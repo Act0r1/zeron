@@ -499,6 +499,33 @@ pub fn normalize_models(harness: &str, models: Vec<ModelInfo>) -> Vec<ModelInfo>
         .collect()
 }
 
+/// Labels learned from hosts' live model catalogs, keyed by (harness, id):
+/// harnesses without a curated list (Codex, Cursor…) still get the host's
+/// human label instead of the raw model id.
+static LEARNED_LABELS: std::sync::LazyLock<
+    std::sync::RwLock<std::collections::HashMap<(String, String), String>>,
+> = std::sync::LazyLock::new(Default::default);
+
+pub(crate) fn learn_labels(harness: &str, models: &[ModelInfo]) {
+    let Ok(mut map) = LEARNED_LABELS.write() else {
+        return;
+    };
+    for m in models {
+        if !m.label.trim().is_empty() && m.label != m.id {
+            map.insert((harness.to_owned(), m.id.clone()), m.label.clone());
+        }
+    }
+}
+
+fn learned_label(harness: &str, model_id: &str) -> Option<String> {
+    let map = LEARNED_LABELS.read().ok()?;
+    map.get(&(harness.to_owned(), model_id.to_owned()))
+        .or_else(|| {
+            stripped_1m(model_id).and_then(|base| map.get(&(harness.to_owned(), base.to_owned())))
+        })
+        .cloned()
+}
+
 /// Human label for a chat's model id (chip / row subtitle).
 pub fn model_label(harness: &str, model_id: &str) -> String {
     let catalog = fallback_models(harness);
@@ -509,7 +536,9 @@ pub fn model_label(harness: &str, model_id: &str) -> String {
     {
         return found.label.clone();
     }
-    curated_label(model_id, &curated_catalog(harness)).unwrap_or_else(|| model_id.to_owned())
+    learned_label(harness, model_id)
+        .or_else(|| curated_label(model_id, &curated_catalog(harness)))
+        .unwrap_or_else(|| model_id.to_owned())
 }
 
 /// Last-known live catalogs on disk (`{data_dir}/catalogs/{device}.json`):
@@ -585,7 +614,26 @@ impl DiskCatalog {
         self.load(device_id).models.remove(harness)
     }
 
+    /// Teach [`model_label`] every label cached on disk (client start).
+    pub(crate) fn warm_labels(&self) {
+        let Ok(entries) = std::fs::read_dir(&self.dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let Ok(bytes) = std::fs::read(entry.path()) else {
+                continue;
+            };
+            let Ok(catalog) = serde_json::from_slice::<DeviceCatalog>(&bytes) else {
+                continue;
+            };
+            for (harness, models) in &catalog.models {
+                learn_labels(harness, models);
+            }
+        }
+    }
+
     pub(crate) fn put_models(&self, device_id: &str, harness: &str, list: &[ModelInfo]) {
+        learn_labels(harness, list);
         let mut catalog = self.load(device_id);
         catalog.models.insert(harness.to_owned(), list.to_vec());
         self.store(device_id, &catalog);
@@ -603,6 +651,28 @@ mod tests {
         assert_eq!(model_label("codex", "gpt-5.6-terra"), "GPT-5.6-Terra");
         assert_eq!(model_label("codex", "some-new-model"), "some-new-model");
         assert_eq!(harness_label("opencode"), "OpenCode");
+    }
+
+    #[test]
+    fn live_catalog_labels_replace_raw_ids() {
+        assert_eq!(
+            model_label("cursor-test", "sonnet-9-thinking"),
+            "sonnet-9-thinking"
+        );
+        learn_labels(
+            "cursor-test",
+            &[model(
+                "sonnet-9-thinking",
+                "Sonnet 9 Thinking",
+                "x",
+                &[],
+                vec![],
+            )],
+        );
+        assert_eq!(
+            model_label("cursor-test", "sonnet-9-thinking"),
+            "Sonnet 9 Thinking"
+        );
     }
 
     #[test]

@@ -46,7 +46,7 @@ struct ComposerChip: Equatable {
 ///
 /// The action button is one control that becomes Send, Queue/Steer (a labelled
 /// pill while an agent works) or Stop.
-final class ComposerBar: UIView, UITextViewDelegate {
+final class ComposerBar: UIView, UITextViewDelegate, UIGestureRecognizerDelegate {
     enum Action: Equatable {
         case send
         case queue
@@ -125,6 +125,7 @@ final class ComposerBar: UIView, UITextViewDelegate {
         // Tapping anywhere on the surface focuses the input.
         let tap = UITapGestureRecognizer(target: self, action: #selector(focusFromTap))
         tap.cancelsTouchesInView = false
+        tap.delegate = self
         glass.addGestureRecognizer(tap)
 
         thumbsScroll.showsHorizontalScrollIndicator = false
@@ -174,7 +175,9 @@ final class ComposerBar: UIView, UITextViewDelegate {
 
         toolbar.translatesAutoresizingMaskIntoConstraints = false
         toolbar.clipsToBounds = true
-        content.addSubview(toolbar)
+        // Beneath the controls: the row spans the card, and above them it
+        // would swallow taps on "+" (the action button is added later).
+        content.insertSubview(toolbar, at: 0)
         chipScroll.showsHorizontalScrollIndicator = false
         chipScroll.translatesAutoresizingMaskIntoConstraints = false
         chipStrip.axis = .horizontal
@@ -261,6 +264,17 @@ final class ComposerBar: UIView, UITextViewDelegate {
         suggestions.translatesAutoresizingMaskIntoConstraints = false
         suggestions.onPick = { [weak self] file in self?.insertMention(file) }
         refreshAction(animated: false)
+    }
+
+    /// Taps on controls (attach, chips, send) are theirs: focusing would
+    /// morph the capsule under the finger and cancel the control's menu.
+    func gestureRecognizer(_ g: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        var v = touch.view
+        while let view = v, view !== glass {
+            if view is UIControl { return false }
+            v = view.superview
+        }
+        return true
     }
 
     @objc private func focusFromTap() {

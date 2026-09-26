@@ -5,7 +5,7 @@ import UIKit
 /// exact row offsets, so this view only (1) asks which rows intersect the
 /// viewport, (2) positions reusable `RowView`s there, and (3) keeps the user's
 /// place across frames (anchor or follow-the-tail).
-final class TranscriptListView: UIScrollView, RowViewDelegate {
+final class TranscriptListView: UIScrollView, RowViewDelegate, UIScrollViewDelegate {
     let engine: TranscriptView
     let fonts = StyleFonts()
     private(set) var current: LayoutFrame?
@@ -50,6 +50,7 @@ final class TranscriptListView: UIScrollView, RowViewDelegate {
         addGestureRecognizer(tap)
         addInteraction(UIContextMenuInteraction(delegate: self))
         panGestureRecognizer.addTarget(self, action: #selector(panned(_:)))
+        delegate = self
         // Display models are a pure cache (rebuilt from the frame on demand).
         NotificationCenter.default.addObserver(forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main) { [weak self] _ in
             self?.cache.removeAll()
@@ -81,9 +82,18 @@ final class TranscriptListView: UIScrollView, RowViewDelegate {
 
     var distanceFromBottom: CGFloat { maxOffsetY - contentOffset.y }
 
+    private var lastReportedY: CGFloat = 0
+
+    /// Follow re-engages only when the user *returns* to the tail: momentum
+    /// carrying the list down into the last 70pt. Never while the finger is
+    /// down — a drag that starts at the bottom would otherwise re-latch
+    /// immediately and spring back down on release.
     private func reportDistance() {
-        onDistanceFromBottom?(distanceFromBottom)
-        if (isDragging || isDecelerating), !following, distanceFromBottom < 70 {
+        let distance = distanceFromBottom
+        onDistanceFromBottom?(distance)
+        let movingDown = contentOffset.y > lastReportedY + 0.1
+        lastReportedY = contentOffset.y
+        if !following, !isTracking, isDecelerating, movingDown || distance <= 0, distance < 70 {
             setFollowing(true)
         }
     }
@@ -95,10 +105,24 @@ final class TranscriptListView: UIScrollView, RowViewDelegate {
         if !value { stopSpring() }
     }
 
-    /// A drag hands control to the user; `reportDistance` re-engages follow
-    /// once they bring the tail back within 70pt.
+    /// A drag hands control to the user. Releasing within 70pt of the tail
+    /// while not flinging away from it hands control back.
     @objc private func panned(_ pan: UIPanGestureRecognizer) {
-        if pan.state == .began { setFollowing(false) }
+        switch pan.state {
+        case .began:
+            setFollowing(false)
+        case .ended, .cancelled:
+            // Finger moving up (negative y) scrolls toward the tail.
+            if distanceFromBottom < 70, pan.velocity(in: self).y <= 50 { setFollowing(true) }
+        default:
+            break
+        }
+    }
+
+    /// Status-bar tap: the user is going to the top, not the tail.
+    func scrollViewShouldScrollToTop(_ scrollView: UIScrollView) -> Bool {
+        setFollowing(false)
+        return true
     }
 
     /// Stop following the tail (programmatic scrolling, benchmarks).

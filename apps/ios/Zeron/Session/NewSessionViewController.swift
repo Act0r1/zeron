@@ -17,6 +17,8 @@ struct ProjectOption: Equatable {
     let id: String
     let name: String
     let device: String
+    /// Display name of `device` (never show the id).
+    let deviceName: String
     let online: Bool
     let git: Bool
     let colorIndex: Int
@@ -152,9 +154,10 @@ final class NewSessionViewController: UIViewController {
 
     private func projectMenu() -> UIMenu {
         let byDevice = Dictionary(grouping: app.projectOptions, by: \.device)
-        var sections: [UIMenuElement] = byDevice.keys.sorted().map { device in
+        var sections: [UIMenuElement] = byDevice.keys.sorted { (byDevice[$0]?.first?.deviceName ?? "") < (byDevice[$1]?.first?.deviceName ?? "") }.map { device in
             let items = byDevice[device]!
-            return UIMenu(title: device + (items.first?.online == false ? " · offline" : ""), options: .displayInline, children: items.map { p in
+            let name = items.first?.deviceName ?? "Host"
+            return UIMenu(title: name + (items.first?.online == false ? " · offline" : ""), options: .displayInline, children: items.map { p in
                 UIAction(title: p.name, image: UIImage(systemName: p.git ? "folder.badge.gearshape" : "folder"), state: p.id == draft.projectId ? .on : .off) { [weak self] _ in
                     self?.draft.projectId = p.id
                     self?.draft.hostId = nil
@@ -202,7 +205,7 @@ final class NewSessionViewController: UIViewController {
             },
             UIMenu(title: "Branch", options: .displayInline, children: [UIDeferredMenuElement { [weak self] done in
                 guard let self, let p = self.project else { return done([]) }
-                Task {
+                Task { @MainActor in
                     let refs = await self.app.refs(projectId: p.id)
                     done(refs.map { ref in
                         UIAction(title: ref, state: ref == (self.draft.branch ?? refs.first) ? .on : .off) { [weak self] _ in
@@ -252,12 +255,6 @@ final class NewSessionViewController: UIViewController {
 }
 
 enum HarnessNames {
-    static func label(_ id: String) -> String {
-        switch id {
-        case "claude-code": "Claude Code"
-        case "codex": "Codex"
-        case "cursor": "Cursor"
-        default: id.capitalized
-        }
-    }
+    /// The core's harness catalog label (same table as desktop).
+    static func label(_ id: String) -> String { harnessLabel(harness: id) }
 }

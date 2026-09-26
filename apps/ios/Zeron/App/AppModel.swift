@@ -97,6 +97,7 @@ final class AppModel {
             if case .workOs = credentials { Credentials.store(credentials) }
             refreshWorkspace()
             client?.preloadSessions()
+            backfillProfile()
             clock?.invalidate()
             // Relative times ("4m") and 45s staleness age without events.
             clock = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in self?.refreshWorkspace() }
@@ -120,11 +121,6 @@ final class AppModel {
         return id
     }
 
-    func enterDemo() {
-        start(.demo(options: Self.demoOptions()))
-        onSignedIn?()
-    }
-
     /// WorkOS code → tokens → org (the first, or the only one) → client.
     func signIn(code: String, chooseOrg: @escaping ([AuthOrg]) async -> AuthOrg?) async throws {
         let edge = Self.edgeURL
@@ -133,6 +129,9 @@ final class AppModel {
         guard !orgs.isEmpty else { throw CoreError.Auth(message: "This account isn't in an organization yet.") }
         guard let org = orgs.count == 1 ? orgs[0] : await chooseOrg(orgs) else { return }
         let tokens = try await authRefresh(edgeUrl: edge, refreshToken: exchange.tokens.refreshToken, organizationId: org.organizationId)
+        let user = exchange.user
+        let name = [user.firstName, user.lastName].compactMap { $0?.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }.joined(separator: " ")
+        AccountProfile(name: name.nonEmpty, email: user.email, orgName: org.name).save()
         await MainActor.run {
             start(.workOs(userId: exchange.user.id, orgId: org.organizationId, tokens: tokens))
             onSignedIn?()
@@ -145,6 +144,7 @@ final class AppModel {
         client?.shutdown()
         client = nil
         Credentials.clearStored()
+        AccountProfile.clear()
         frontPage = FrontPage()
         clock?.invalidate()
     }
@@ -333,19 +333,47 @@ final class AppModel {
 
     // MARK: New session
 
-    var accountName: String { isDemo ? "Demo" : (client?.userId() ?? "Signed out") }
-    var accountDetail: String { isDemo ? "Offline demo workspace" : "Organization \(client?.orgId() ?? "")" }
+    /// Who's signed in, by name (never the WorkOS user / org ids).
+    var accountName: String {
+        if isDemo { return "Demo" }
+        guard client != nil else { return "Signed out" }
+        let p = AccountProfile.load()
+        return p.name ?? p.email ?? "Signed in"
+    }
+
+    var accountDetail: String {
+        if isDemo { return "Offline demo workspace" }
+        let p = AccountProfile.load()
+        return [p.name != nil ? p.email : nil, p.orgName].compactMap { $0 }.joined(separator: " · ").nonEmpty ?? "Zeron account"
+    }
+
+    /// Logins from before profiles were saved: recover the org name (the
+    /// user's name comes back at the next sign-in).
+    private func backfillProfile() {
+        guard case let .workOs(_, orgId, tokens)? = Credentials.stored(), AccountProfile.load().orgName == nil else { return }
+        let edge = Self.edgeURL
+        Task { @MainActor [weak self] in
+            guard let orgs = try? await authListOrgs(edgeUrl: edge, accessToken: tokens.accessToken),
+                  let org = orgs.first(where: { $0.organizationId == orgId })
+            else { return }
+            var p = AccountProfile.load()
+            p.orgName = org.name
+            p.save()
+            self?.observers.values.forEach { $0() }
+        }
+    }
 
     var projectOptions: [ProjectOption] {
-        rawProjects.map { ProjectOption(id: $0.id, name: $0.name, device: $0.deviceId, online: $0.deviceOnline, git: $0.gitDetected, colorIndex: Int($0.colorIndex)) }
+        rawProjects.map { ProjectOption(id: $0.id, name: $0.name, device: $0.deviceId, deviceName: $0.deviceName ?? deviceName($0.deviceId), online: $0.deviceOnline, git: $0.gitDetected, colorIndex: Int($0.colorIndex)) }
     }
 
     var hostOptions: [HostOption] {
         (client?.executionDevices() ?? []).map { HostOption(id: $0.id, name: $0.name, online: $0.online) }
     }
 
+    /// A device's name; never its id.
     func deviceName(_ id: String) -> String {
-        client?.devices().first { $0.id == id }?.name ?? id
+        client?.devices().first { $0.id == id }?.name ?? "Unknown device"
     }
 
     func models(for deviceId: String) async -> [ModelChoice] {
@@ -363,6 +391,7 @@ final class AppModel {
         try? await client?.listFolders(deviceId: deviceId, path: path)
     }
 
+    @MainActor
     func createProject(deviceId: String, path: String, gitDetected: Bool) async -> String? {
         guard let client else { return nil }
         do {
@@ -513,4 +542,31 @@ enum Keychain {
         ]
         SecItemDelete(q as CFDictionary)
     }
+}
+
+/// Display identity of the signed-in account (Keychain, next to the
+/// credentials): the client itself only knows ids.
+struct AccountProfile: Codable {
+    var name: String?
+    var email: String?
+    var orgName: String?
+
+    private static let service = "sh.zeron.ios"
+    private static let account = "profile"
+
+    static func load() -> AccountProfile {
+        Keychain.load(service: service, account: account).flatMap { try? JSONDecoder().decode(AccountProfile.self, from: $0) } ?? AccountProfile()
+    }
+
+    func save() {
+        if let data = try? JSONEncoder().encode(self) { Keychain.save(data, service: Self.service, account: Self.account) }
+    }
+
+    static func clear() {
+        Keychain.delete(service: service, account: account)
+    }
+}
+
+extension String {
+    var nonEmpty: String? { isEmpty ? nil : self }
 }

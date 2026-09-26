@@ -319,6 +319,13 @@ pub(crate) struct DeriveContext<'a> {
     pub previous: Option<&'a WorkspaceSnapshot>,
 }
 
+/// A device's display name, or `None` when it has none worth showing (blank,
+/// or the engine's legacy `unknown-device` sentinel). Never an id.
+pub(crate) fn device_display_name(device: &Device) -> Option<String> {
+    let name = device.name.trim();
+    (!name.is_empty() && name != "unknown-device").then(|| name.to_owned())
+}
+
 fn is_execution_host(device: &Device) -> bool {
     !matches!(device.platform.as_str(), "ios" | "android" | "ipados")
 }
@@ -469,7 +476,7 @@ fn build_row(chat: &Chat, rc: &RowContext<'_>, cx: &DeriveContext<'_>) -> Arc<Se
             .filter(|p| !p.is_empty()),
         project,
         device_id: chat.device_id.clone(),
-        device_name: device.map(|d| d.name.clone()),
+        device_name: device.and_then(|d| device_display_name(d)),
         device_online: device_online(&chat.device_id, cx.presence, cx.self_device_id, now_ms),
         harness_label: harness.as_deref().map(catalog::harness_label),
         model_label: match (harness.as_deref(), model.as_deref()) {
@@ -619,7 +626,7 @@ pub(crate) fn derive(
                 device_name: rc
                     .devices
                     .get(space.device_id.as_str())
-                    .map(|d| d.name.clone()),
+                    .and_then(|d| device_display_name(d)),
                 device_online: device_online(
                     &space.device_id,
                     cx.presence,
@@ -677,7 +684,7 @@ pub(crate) fn derive(
         .iter()
         .map(|device| DeviceView {
             id: device.id.clone(),
-            name: device.name.clone(),
+            name: device_display_name(device).unwrap_or_else(|| "Unknown device".to_owned()),
             platform: device.platform.clone(),
             online: device_online(&device.id, cx.presence, cx.self_device_id, now_ms),
             last_seen_ms: cx

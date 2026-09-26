@@ -164,7 +164,7 @@ final class CoreSessionSource: SessionSource {
         case "model":
             return UIMenu(title: "Model", children: [UIDeferredMenuElement { [weak self] done in
                 guard let self else { return done([]) }
-                Task {
+                Task { @MainActor in
                     let models = (try? await self.client.listModels(deviceId: self.hostDevice, harness: harness)) ?? fallbackModels(harness: harness)
                     done(models.map { m in
                         UIAction(title: m.label, subtitle: m.description, state: m.id == row.model ? .on : .off) { [weak self] _ in
@@ -176,7 +176,7 @@ final class CoreSessionSource: SessionSource {
         case "effort":
             return UIMenu(title: "Reasoning effort", children: [UIDeferredMenuElement { [weak self] done in
                 guard let self else { return done([]) }
-                Task {
+                Task { @MainActor in
                     let models = (try? await self.client.listModels(deviceId: self.hostDevice, harness: harness)) ?? fallbackModels(harness: harness)
                     let levels = models.first { $0.id == row.model }?.reasoningLevels ?? models.first?.reasoningLevels ?? []
                     done(levels.map { l in

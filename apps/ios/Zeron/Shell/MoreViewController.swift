@@ -120,6 +120,12 @@ final class MoreViewController: UIViewController, UICollectionViewDelegate {
             UserDefaults.standard.set(style, forKey: "appearance")
             view.window?.overrideUserInterfaceStyle = UIUserInterfaceStyle(rawValue: style) ?? .unspecified
             reload()
+        case "org":
+            // The org picker lives in sign-in (multi-org accounts are asked).
+            let alert = UIAlertController(title: "Switch organization?", message: "You'll sign in again and pick an organization. Local drafts stay on this device.", preferredStyle: .actionSheet)
+            alert.addAction(UIAlertAction(title: "Sign In Again", style: .default) { [weak self] _ in self?.app.signOut() })
+            alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+            present(alert, animated: true)
         case "archived":
             navigationController?.pushViewController(FolderViewController(app: app, folder: FolderRowVM(id: "archived", name: "Archived", count: 0, symbol: "archivebox")), animated: true)
         case "lab":

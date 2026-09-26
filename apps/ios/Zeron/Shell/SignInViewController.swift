@@ -19,7 +19,7 @@ enum Endpoints {
     }
 }
 
-/// Sign in with WorkOS (system web auth sheet), or explore the offline demo.
+/// Sign in with WorkOS (system web auth sheet).
 final class SignInViewController: UIViewController, ASWebAuthenticationPresentationContextProviding {
     private let app: AppModel
     private let status = UILabel()
@@ -63,14 +63,6 @@ final class SignInViewController: UIViewController, ASWebAuthenticationPresentat
         signIn.accessibilityIdentifier = "sign-in"
         signIn.addAction(UIAction { [weak self] _ in self?.startWorkOS() }, for: .touchUpInside)
 
-        var secondary = UIButton.Configuration.glass()
-        secondary.title = "Explore the Demo"
-        secondary.baseForegroundColor = Palette.text
-        secondary.cornerStyle = .capsule
-        secondary.contentInsets = NSDirectionalEdgeInsets(top: 15, leading: 20, bottom: 15, trailing: 20)
-        let demo = UIButton(configuration: secondary, primaryAction: UIAction { [weak self] _ in self?.app.enterDemo() })
-        demo.accessibilityIdentifier = "demo"
-
         status.font = Fonts.ui(.sans, 14)
         status.textColor = Palette.danger
         status.numberOfLines = 0
@@ -80,7 +72,7 @@ final class SignInViewController: UIViewController, ASWebAuthenticationPresentat
         top.axis = .vertical
         top.alignment = .center
         top.spacing = 12
-        let buttons = UIStackView(arrangedSubviews: [status, signIn, demo])
+        let buttons = UIStackView(arrangedSubviews: [status, signIn])
         buttons.axis = .vertical
         buttons.spacing = 12
         for v in [top, buttons] {

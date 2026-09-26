@@ -184,4 +184,92 @@ final class SessionFlowTests: XCTestCase {
         XCTAssertTrue(app.textViews.firstMatch.waitForExistence(timeout: 5))
         snapshot(app, "tool-detail")
     }
+
+    /// Regression: picking a reasoning effort from the composer chip crashed.
+    func testEffortPickerInSession() {
+        let app = launch(["-route", "chat:chat-deploy"])
+        let input = app.textViews["composer-input"]
+        XCTAssertTrue(input.waitForExistence(timeout: 10))
+        input.tap()
+        let chip = app.buttons["composer-chip-effort"]
+        XCTAssertTrue(chip.waitForExistence(timeout: 5))
+        chip.tap()
+        let item = app.collectionViews.buttons.element(boundBy: 0)
+        XCTAssertTrue(item.waitForExistence(timeout: 5), "effort levels load")
+        snapshot(app, "effort-menu")
+        item.tap()
+        XCTAssertTrue(input.waitForExistence(timeout: 5))
+        XCTAssertEqual(app.state, .runningForeground)
+        chip.tap()
+        XCTAssertTrue(app.collectionViews.buttons.element(boundBy: 0).waitForExistence(timeout: 5))
+        XCTAssertEqual(app.state, .runningForeground)
+    }
+
+    func testEffortPickerInNewSession() {
+        let app = launch(["-route", "new"])
+        let chip = app.buttons["composer-chip-effort"]
+        XCTAssertTrue(chip.waitForExistence(timeout: 10))
+        chip.tap()
+        let item = app.collectionViews.buttons.element(boundBy: 0)
+        XCTAssertTrue(item.waitForExistence(timeout: 5))
+        item.tap()
+        XCTAssertTrue(chip.waitForExistence(timeout: 5))
+        XCTAssertEqual(app.state, .runningForeground)
+    }
+
+    /// Regression: "+" in the resting capsule did nothing (the focus tap
+    /// morphed the composer under the finger and cancelled the menu).
+    func testAttachMenuOpens() {
+        for route in [["-route", "chat:chat-deploy"], ["-route", "new"]] {
+            let app = launch(route)
+            let attach = app.buttons["composer-attach"]
+            XCTAssertTrue(attach.waitForExistence(timeout: 10))
+            attach.tap()
+            XCTAssertTrue(app.buttons["Photo Library"].waitForExistence(timeout: 5), "attach menu opens (\(route))")
+            snapshot(app, "attach-menu")
+            app.terminate()
+        }
+        // Card state (focused, with a draft): the toolbar row must not cover "+".
+        let app = launch(["-route", "chat:chat-deploy"])
+        let input = app.textViews["composer-input"]
+        XCTAssertTrue(input.waitForExistence(timeout: 10))
+        input.tap()
+        input.typeText("Draft")
+        app.buttons["composer-attach"].tap()
+        XCTAssertTrue(app.buttons["Photo Library"].waitForExistence(timeout: 5), "attach menu opens from the card")
+    }
+
+    /// Regression: the model chip's menu completed off the main thread.
+    func testModelPickerInSession() {
+        let app = launch(["-route", "chat:chat-deploy"])
+        let input = app.textViews["composer-input"]
+        XCTAssertTrue(input.waitForExistence(timeout: 10))
+        input.tap()
+        let chip = app.buttons["composer-chip-model"]
+        XCTAssertTrue(chip.waitForExistence(timeout: 5))
+        chip.tap()
+        let item = app.collectionViews.buttons.element(boundBy: 0)
+        XCTAssertTrue(item.waitForExistence(timeout: 5), "models load")
+        item.tap()
+        XCTAssertTrue(input.waitForExistence(timeout: 5))
+        XCTAssertEqual(app.state, .runningForeground)
+    }
+
+    /// Regression: a drag that starts at the tail re-latched follow at once,
+    /// so the list sprang back to the bottom on release while streaming.
+    func testScrollingUpWhileStreamingStaysPut() {
+        let app = launch(["-route", "chat:chat-veil", "-big", "-longreply"], fast: false)
+        let input = app.textViews["composer-input"]
+        XCTAssertTrue(input.waitForExistence(timeout: 10))
+        input.tap()
+        input.typeText("Walk me through the veil")
+        app.buttons["composer-send"].tap()
+        let transcript = app.scrollViews["transcript"]
+        sleep(2)
+        let from = transcript.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
+        from.press(forDuration: 0.05, thenDragTo: transcript.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.75)), withVelocity: .slow, thenHoldForDuration: 0.1)
+        sleep(3)
+        XCTAssertTrue(app.buttons["jump-to-latest"].isHittable, "stays scrolled up while the reply streams")
+        snapshot(app, "scrolled-up-streaming")
+    }
 }

@@ -607,10 +607,13 @@ impl Client {
                 inner.synced.store(true, Ordering::Release);
                 Backend::Demo(demo)
             }
-            _ => Backend::Live(Box::new(LiveBackend::new(
-                &inner,
-                store.ok_or_else(|| ClientError::Internal("docs store missing".into()))?,
-            ))),
+            _ => Backend::Live(Box::new({
+                catalog::DiskCatalog::new(&inner.config.data_dir).warm_labels();
+                LiveBackend::new(
+                    &inner,
+                    store.ok_or_else(|| ClientError::Internal("docs store missing".into()))?,
+                )
+            })),
         };
         let _ = inner.backend.set(backend);
         events.start(inner.cancel.clone());
@@ -1143,11 +1146,17 @@ impl Client {
                     Ok(list) if !list.is_empty() => {
                         let list = catalog::normalize_models(harness, list);
                         cache.put_models(device_id, harness, &list);
+                        // Rows and chips pick up newly learned model labels.
+                        self.inner.recompute_workspace();
                         list
                     }
-                    _ => cache
-                        .models(device_id, harness)
-                        .unwrap_or_else(|| catalog::fallback_models(harness)),
+                    _ => match cache.models(device_id, harness) {
+                        Some(list) => {
+                            catalog::learn_labels(harness, &list);
+                            list
+                        }
+                        None => catalog::fallback_models(harness),
+                    },
                 }
             }
         }
