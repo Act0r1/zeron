@@ -34,17 +34,19 @@ Zeron/
                workspace snapshots to view models; Keychain credentials)
   Core/        Generated UniFFI bindings; Fonts (the exact bytes Rust measures,
                registered with CoreText) + CoreText fallback measurer
-  Design/      Palette (color roles → light/dark), Glass helpers, DotGridView,
-               brand marks
+  Design/      Palette (Zeron color roles → light/dark), Glass helpers, Zeron
+               mark + cell-matrix status glyph, harness brand marks
   Transcript/  TranscriptListView (virtualized scroll host over LayoutFrame),
                RowView/RowModel (CoreText painter for Rust display lists,
                streaming veil), FrameRelay
   Session/     SessionViewController, SessionSource (Core/Fixture), new-session
                canvas
-  Composer/    ComposerBar (glass capsule, send/queue/steer/stop), question and
-               queue panels, attachment picker
-  Threads/     Sessions/folders/PRs/search lists, Projects groups, cells
-  Shell/       Tab bar (+ search tab, "Ask anything" accessory), More, sign-in
+  Composer/    ComposerBar (glass capsule ⇄ card with inline context chips;
+               send/queue/steer/stop), question and queue panels, attachments
+  Threads/     Sessions (foldable sidebar sections)/PRs/search lists,
+               Projects groups, cells
+  Shell/       Tab bar (+ search tab, "New session" accessory with live
+               summary), Settings, sign-in
   Debug/       Transcript lab + hitch meter
 ```
 

@@ -24,9 +24,18 @@ final class SessionFlowTests: XCTestCase {
     func testFrontPageShowsFoldersAndRecents() {
         let app = launch()
         XCTAssertTrue(app.staticTexts["Sessions"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.cells["folder-pinned"].exists)
+        let pinned = app.cells["section-pinned"]
+        XCTAssertTrue(pinned.exists)
         snapshot(app, "front-page")
-        app.cells["folder-pinned"].tap()
+        // Sections fold in place, like the desktop sidebar.
+        let wasCollapsed = pinned.value as? String == "Collapsed"
+        pinned.tap()
+        XCTAssertEqual(pinned.value as? String, wasCollapsed ? "Expanded" : "Collapsed")
+        pinned.tap()
+        XCTAssertEqual(pinned.value as? String, wasCollapsed ? "Collapsed" : "Expanded")
+        // Long-press → Open drills into the folder (reorder lives there).
+        pinned.press(forDuration: 0.8)
+        app.buttons["Open"].tap()
         XCTAssertTrue(app.navigationBars["Pinned"].waitForExistence(timeout: 5))
         snapshot(app, "pinned-folder")
     }
@@ -132,6 +141,8 @@ final class SessionFlowTests: XCTestCase {
         let app = launch()
         let cell = app.cells["session-chat-deploy"]
         XCTAssertTrue(cell.waitForExistence(timeout: 10))
+        // Recent sits below the inline sections; bring the row clear of the accessory.
+        app.collectionViews.firstMatch.swipeUp()
         cell.swipeLeft()
         app.buttons["Archive"].tap()
         let undo = app.buttons["toast-action"]

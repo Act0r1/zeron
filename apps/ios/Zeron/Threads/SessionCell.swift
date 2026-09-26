@@ -210,3 +210,80 @@ final class FolderCell: UICollectionViewListCell {
         backgroundConfiguration = bg
     }
 }
+
+/// Foldable section header (desktop sidebar style): name, count, a live
+/// glyph when something inside is working, and a disclosure chevron.
+final class SectionHeaderCell: UICollectionViewListCell {
+    struct State: Equatable {
+        let id: String
+        var title: String
+        var count: Int
+        var collapsed: Bool
+        var live: DotGridView.Style?
+    }
+
+    static var height: CGFloat { (40 * TypeScale.factor).rounded() }
+    private let title = UILabel()
+    private let count = UILabel()
+    private let chevron = UIImageView(image: UIImage(systemName: "chevron.down", withConfiguration: UIImage.SymbolConfiguration(pointSize: 11, weight: .semibold)))
+    private let live = DotGridView(style: .working)
+    private var shownCollapsed: Bool?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        title.textColor = Palette.secondary
+        count.textColor = Palette.tertiary
+        chevron.tintColor = Palette.tertiary
+        chevron.contentMode = .center
+        for v in [title, count, chevron, live] as [UIView] { contentView.addSubview(v) }
+        accessibilityTraits = .button
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func preferredLayoutAttributesFitting(_ attrs: UICollectionViewLayoutAttributes) -> UICollectionViewLayoutAttributes {
+        attrs.size.height = Self.height
+        return attrs
+    }
+
+    override func updateConfiguration(using state: UICellConfigurationState) {
+        var bg = UIBackgroundConfiguration.listCell().updated(for: state)
+        bg.backgroundColor = state.isHighlighted ? Palette.controlFill : .clear
+        bg.cornerRadius = 12
+        bg.backgroundInsets = NSDirectionalEdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8)
+        backgroundConfiguration = bg
+    }
+
+    func configure(_ s: State) {
+        title.font = Fonts.ui(.sansSemibold, TypeScale.size(13.5))
+        count.font = Fonts.ui(.sansMedium, TypeScale.size(13.5))
+        title.text = s.title
+        count.text = "\(s.count)"
+        live.isHidden = s.live == nil
+        if let style = s.live { live.style = style }
+        let rotate = { self.chevron.transform = s.collapsed ? CGAffineTransform(rotationAngle: -.pi / 2) : .identity }
+        if shownCollapsed != nil, shownCollapsed != s.collapsed, window != nil {
+            UIView.animate(withDuration: 0.3, delay: 0, usingSpringWithDamping: 0.85, initialSpringVelocity: 0, animations: rotate)
+        } else {
+            rotate()
+        }
+        shownCollapsed = s.collapsed
+        accessibilityIdentifier = "section-\(s.id)"
+        accessibilityLabel = "\(s.title), \(s.count)"
+        accessibilityValue = s.collapsed ? "Collapsed" : "Expanded"
+        setNeedsLayout()
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let b = contentView.bounds
+        let h: CGFloat = 20
+        let y = b.height - h - 6
+        let tw = ceil(title.sizeThatFits(b.size).width)
+        title.frame = CGRect(x: 20, y: y, width: min(tw, b.width - 120), height: h)
+        let cw = ceil(count.sizeThatFits(b.size).width)
+        count.frame = CGRect(x: title.frame.maxX + 7, y: y, width: cw, height: h)
+        live.frame = CGRect(x: count.frame.maxX + 8, y: y + h / 2 - 5, width: 10, height: 10)
+        chevron.frame = CGRect(x: b.width - 20 - 16, y: y, width: 16, height: h)
+    }
+}

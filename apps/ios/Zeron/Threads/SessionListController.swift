@@ -21,6 +21,10 @@ class SessionListController: UIViewController, UICollectionViewDelegate {
     var indentedSections: Set<String> = []
     /// Show drag handles in edit mode (Pinned).
     var reorderable = false
+    /// Headers are disclosure rows that fold their section (front page).
+    var collapsible = false
+    private(set) var collapsed = Set(UserDefaults.standard.stringArray(forKey: "collapsedSections") ?? [])
+    private var headerStates: [String: SectionHeaderCell.State] = [:]
 
     init(app: AppModel) {
         self.app = app
@@ -65,10 +69,15 @@ class SessionListController: UIViewController, UICollectionViewDelegate {
             bg.backgroundColor = .clear
             cell.backgroundConfiguration = bg
         }
-        dataSource = UICollectionViewDiffableDataSource(collectionView: collectionView) { cv, path, item in
+        let sectionReg = UICollectionView.CellRegistration<SectionHeaderCell, String> { [weak self] cell, _, id in
+            guard let state = self?.headerStates[id] else { return }
+            cell.configure(state)
+        }
+        dataSource = UICollectionViewDiffableDataSource(collectionView: collectionView) { [weak self] cv, path, item in
             switch item {
             case let .session(id): cv.dequeueConfiguredReusableCell(using: sessionReg, for: path, item: id)
             case let .folder(id): cv.dequeueConfiguredReusableCell(using: folderReg, for: path, item: id)
+            case let .header(id) where self?.collapsible == true: cv.dequeueConfiguredReusableCell(using: sectionReg, for: path, item: id)
             case let .header(id): cv.dequeueConfiguredReusableCell(using: headerReg, for: path, item: id)
             }
         }
@@ -105,6 +114,21 @@ class SessionListController: UIViewController, UICollectionViewDelegate {
             if let header = s.header {
                 headers[s.id] = header
                 items.append(.header(s.id))
+                if collapsible {
+                    let state = SectionHeaderCell.State(
+                        id: s.id,
+                        title: header,
+                        count: s.sessions.count,
+                        collapsed: collapsed.contains(s.id),
+                        live: s.sessions.contains { $0.status == .working } ? .working : s.sessions.contains { $0.status == .awaiting } ? .awaiting : nil
+                    )
+                    if let old = headerStates[s.id], old != state { changed.append(.header(s.id)) }
+                    headerStates[s.id] = state
+                    if state.collapsed {
+                        snapshot.appendItems(items, toSection: s.id)
+                        continue
+                    }
+                }
             }
             for f in s.folders {
                 if folders[f.id] != nil, folders[f.id] != f { changed.append(.folder(f.id)) }
@@ -134,22 +158,34 @@ class SessionListController: UIViewController, UICollectionViewDelegate {
             openSession(id)
         case let .folder(id):
             openFolder(id)
+        case let .header(id) where collapsible:
+            toggleSection(id)
         default:
             break
         }
     }
 
     func collectionView(_ collectionView: UICollectionView, shouldSelectItemAt indexPath: IndexPath) -> Bool {
-        if case .header = dataSource.itemIdentifier(for: indexPath) { return false }
+        if case .header = dataSource.itemIdentifier(for: indexPath) { return collapsible }
         return true
     }
+
+    func toggleSection(_ id: String) {
+        if collapsed.remove(id) == nil { collapsed.insert(id) }
+        UserDefaults.standard.set(Array(collapsed), forKey: "collapsedSections")
+        UISelectionFeedbackGenerator().selectionChanged()
+        reload(animated: true)
+    }
+
+    /// Long-press actions for a collapsible section header.
+    func headerMenu(_ id: String) -> UIMenu? { nil }
 
     func openSession(_ id: String) {
         navigationController?.pushViewController(SessionViewController(app: app, chatId: id), animated: true)
     }
 
     func openFolder(_ id: String) {
-        guard let f = folders[id] else { return }
+        guard let f = folders[id] ?? app.frontPage.folders.first(where: { $0.id == id }) else { return }
         navigationController?.pushViewController(FolderViewController(app: app, folder: f), animated: true)
     }
 
@@ -189,6 +225,9 @@ class SessionListController: UIViewController, UICollectionViewDelegate {
     }
 
     func collectionView(_ collectionView: UICollectionView, contextMenuConfigurationForItemsAt indexPaths: [IndexPath], point: CGPoint) -> UIContextMenuConfiguration? {
+        if let path = indexPaths.first, case let .header(id) = dataSource.itemIdentifier(for: path), let menu = headerMenu(id) {
+            return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in menu }
+        }
         guard let path = indexPaths.first, let id = sessionId(path), let vm = sessions[id] else { return nil }
         return UIContextMenuConfiguration(identifier: id as NSString, previewProvider: nil) { [weak self] _ in
             guard let self else { return nil }
@@ -246,9 +285,12 @@ class SessionListController: UIViewController, UICollectionViewDelegate {
     }
 }
 
-/// Front page: folders (Pinned + user sections), then recent sessions.
+/// Front page, laid out like the desktop sidebar: Pinned and the user's
+/// sections inline as foldable groups, then everything else under Recent.
+/// Fold state persists; long-press a header for its actions.
 final class SessionsViewController: SessionListController {
     override func viewDidLoad() {
+        collapsible = true
         super.viewDidLoad()
         title = "Sessions"
         navigationItem.largeTitleDisplayMode = .always
@@ -256,7 +298,40 @@ final class SessionsViewController: SessionListController {
     }
 
     override func buildSections() -> [(id: String, header: String?, folders: [FolderRowVM], sessions: [SessionRowVM])] {
-        [("folders", nil, app.frontPage.folders, []), ("recent", nil, [], app.frontPage.sessions)]
+        var out: [(id: String, header: String?, folders: [FolderRowVM], sessions: [SessionRowVM])] = []
+        for f in app.frontPage.folders {
+            out.append((f.id, f.name, [], app.sessions(inFolder: f.id)))
+        }
+        out.append(("recent", out.isEmpty ? nil : "Recent", [], app.frontPage.sessions))
+        return out
+    }
+
+    override func headerMenu(_ id: String) -> UIMenu? {
+        if id == "recent" { return nil }
+        guard let folder = app.frontPage.folders.first(where: { $0.id == id }) else { return nil }
+        let open = UIAction(title: "Open", image: UIImage(systemName: "arrow.up.right")) { [weak self] _ in self?.openFolder(id) }
+        if id == "pinned" {
+            return UIMenu(children: [
+                open,
+                UIAction(title: "Reorder…", image: UIImage(systemName: "arrow.up.arrow.down")) { [weak self] _ in self?.openFolder(id) },
+            ])
+        }
+        return UIMenu(children: [
+            open,
+            UIAction(title: "Rename Section…", image: UIImage(systemName: "pencil")) { [weak self] _ in self?.renameSection(folder) },
+            UIAction(title: "Delete Section", image: UIImage(systemName: "trash"), attributes: .destructive) { [weak self] _ in self?.app.deleteSection(id) },
+        ])
+    }
+
+    private func renameSection(_ folder: FolderRowVM) {
+        let alert = UIAlertController(title: "Rename Section", message: nil, preferredStyle: .alert)
+        alert.addTextField { $0.text = folder.name }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Rename", style: .default) { [weak self] _ in
+            guard let name = alert.textFields?.first?.text?.trimmingCharacters(in: .whitespaces), !name.isEmpty else { return }
+            self?.app.renameSection(folder.id, name)
+        })
+        present(alert, animated: true)
     }
 
     private func optionsMenu() -> UIMenu {
@@ -264,10 +339,10 @@ final class SessionsViewController: SessionListController {
             UIAction(title: "New Section…", image: UIImage(systemName: "folder.badge.plus")) { [weak self] _ in
                 self?.promptForSection { name in self?.app.createSection(name) }
             },
-            UIMenu(title: "Show Pinned", image: UIImage(systemName: "pin"), children: [
-                UIAction(title: "As a Folder", state: app.pinnedInline ? .off : .on) { [weak self] _ in self?.app.pinnedInline = false },
-                UIAction(title: "At the Top", state: app.pinnedInline ? .on : .off) { [weak self] _ in self?.app.pinnedInline = true },
-            ]),
+            UIAction(title: "Collapse All", image: UIImage(systemName: "rectangle.compress.vertical")) { [weak self] _ in
+                guard let self else { return }
+                for f in self.app.frontPage.folders where !self.collapsed.contains(f.id) { self.toggleSection(f.id) }
+            },
             UIAction(title: "Archived", image: UIImage(systemName: "archivebox")) { [weak self] _ in
                 guard let self else { return }
                 self.navigationController?.pushViewController(FolderViewController(app: self.app, folder: FolderRowVM(id: "archived", name: "Archived", count: 0, symbol: "archivebox")), animated: true)

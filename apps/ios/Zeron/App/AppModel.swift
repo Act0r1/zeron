@@ -233,8 +233,7 @@ final class AppModel {
         }
         var page = FrontPage()
         let pinned = ws.front.pinned.map(vm)
-        let inline = pinnedInline
-        if !pinned.isEmpty, !inline {
+        if !pinned.isEmpty {
             page.folders.append(FolderRowVM(id: "pinned", name: "Pinned", count: pinned.count, symbol: "pin"))
         }
         page.sectionSessions["pinned"] = pinned
@@ -243,7 +242,7 @@ final class AppModel {
             page.folders.append(FolderRowVM(id: s.id, name: s.name, count: list.count, symbol: "folder"))
             page.sectionSessions[s.id] = list
         }
-        page.sessions = (inline ? pinned : []) + ws.front.recent.map(vm)
+        page.sessions = ws.front.recent.map(vm)
         rawProjects = ws.projects
         let projectVMs = ws.projects.map { p in
             ProjectVM(
@@ -332,15 +331,6 @@ final class AppModel {
         return client.search(query: q, limit: 60).map { Self.vm($0.session) }
     }
 
-    /// Front-page preference: pinned sessions as a folder or inline at top.
-    var pinnedInline: Bool {
-        get { UserDefaults.standard.bool(forKey: "pinnedInline") }
-        set {
-            UserDefaults.standard.set(newValue, forKey: "pinnedInline")
-            refreshWorkspace()
-            observers.values.forEach { $0() }
-        }
-    }
 
     // MARK: Writes
 
