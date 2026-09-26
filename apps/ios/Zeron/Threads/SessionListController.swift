@@ -117,7 +117,7 @@ class SessionListController: UIViewController, UICollectionViewDelegate {
                         title: header,
                         count: s.sessions.count,
                         collapsed: collapsed.contains(s.id),
-                        live: s.sessions.contains { $0.status == .working } ? .working : s.sessions.contains { $0.status == .awaiting } ? .awaiting : nil
+                        live: s.sessions.contains { $0.status == .working } ? .spinner : s.sessions.contains { $0.status == .awaiting } ? .dot(StatusTone.input) : nil
                     )
                     if let old = headerStates[s.id], old != state { changed.append(.header(s.id)) }
                     headerStates[s.id] = state

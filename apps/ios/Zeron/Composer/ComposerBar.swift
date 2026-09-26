@@ -90,10 +90,10 @@ final class ComposerBar: UIView, UITextViewDelegate {
     private let attachButton = UIButton(type: .system)
     private let actionButton = UIButton(type: .system)
     private let thumbs = UIStackView()
-    private let thumbsScroll = UIScrollView()
+    private let thumbsScroll = FadingScrollView()
     private let toolbar = UIView()
     private let chipStrip = UIStackView()
-    private let chipScroll = UIScrollView()
+    private let chipScroll = FadingScrollView()
     private var textHeight: NSLayoutConstraint!
     private var thumbsHeight: NSLayoutConstraint!
     private var toolbarHeight: NSLayoutConstraint!
@@ -404,14 +404,17 @@ final class ComposerBar: UIView, UITextViewDelegate {
             } else if let symbol = chip.symbol {
                 config.image = UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: 11.5, weight: .semibold))
             }
-            config.imagePadding = 6
-            config.baseForegroundColor = chip.tint ?? Palette.text
-            config.baseBackgroundColor = Palette.controlFill
+            config.imagePadding = chip.id == "pr" ? 5 : 6
+            // Tinted chips (the PR badge) use the desktop's tone wash: fill
+            // @ 0.08, ink @ 0.85.
+            config.baseForegroundColor = chip.tint.map { $0.withAlphaComponent(0.85) } ?? Palette.text
+            config.baseBackgroundColor = chip.tint.map { $0.withAlphaComponent(0.1) } ?? Palette.controlFill
             config.cornerStyle = .capsule
             config.contentInsets = NSDirectionalEdgeInsets(top: 7, leading: 11, bottom: 7, trailing: 11)
             config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attrs in
                 var a = attrs
-                a.font = Fonts.ui(chip.id == "branch" ? .mono : .sansMedium, chip.id == "branch" ? 12.5 : 13.5)
+                let mono = chip.id == "branch" || chip.id == "pr"
+                a.font = Fonts.ui(mono ? .monoMedium : .sansMedium, mono ? 12.5 : 13.5)
                 return a
             }
             let b = UIButton(configuration: config)

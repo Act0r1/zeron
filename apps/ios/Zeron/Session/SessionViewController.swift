@@ -297,17 +297,17 @@ final class SessionViewController: UIViewController {
 
 /// Two-line navigation title: session title over "project @ device".
 final class SessionTitleView: UIView {
-    private let title = UILabel()
-    private let subtitle = UILabel()
+    private let title = FadingLabel()
+    private let subtitle = FadingLabel()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         title.font = Fonts.ui(.sansSemibold, 16)
         title.textColor = Palette.text
-        title.textAlignment = .center
+        title.fitsAlignment = .center
         subtitle.font = Fonts.ui(.sans, 12)
         subtitle.textColor = Palette.secondary
-        subtitle.textAlignment = .center
+        subtitle.fitsAlignment = .center
         let stack = UIStackView(arrangedSubviews: [title, subtitle])
         stack.axis = .vertical
         stack.alignment = .center
@@ -337,7 +337,7 @@ final class StatusPill: UIControl {
     var onTap: (() -> Void)?
     var banner: SessionChrome.Banner = .none { didSet { if banner != oldValue { update() } } }
     private let glass = Glass.surface()
-    private let grid = DotGridView(style: .working)
+    private let grid = StatusGlyph(.trailer)
     private let label = UILabel()
     private var timer: Timer?
 
@@ -378,7 +378,7 @@ final class StatusPill: UIControl {
         case .none:
             break
         case let .working(since, word):
-            grid.style = .working
+            grid.kind = .trailer
             let render = { [weak self] in
                 let secs = since.map { Int(Date().timeIntervalSince($0)) } ?? 0
                 self?.label.text = secs > 0 ? "\(word) · \(Self.elapsed(secs))" : "\(word)…"
@@ -386,22 +386,22 @@ final class StatusPill: UIControl {
             render()
             timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in render() }
         case .offline:
-            grid.style = .idle
+            grid.kind = .dot(StatusTone.idle)
             label.text = "Offline — sends are saved"
         case let .reconnecting(secs):
-            grid.style = .idle
+            grid.kind = .dot(StatusTone.idle)
             label.text = "Reconnecting in \(secs)s"
         case .notDelivered:
-            grid.style = .errored
+            grid.kind = .dot(Palette.danger)
             label.text = "Not delivered · Tap to retry"
         case let .uploading(p):
-            grid.style = .working
+            grid.kind = .spinner
             label.text = "Uploading… \(Int(p * 100))%"
         case let .failed(message):
-            grid.style = .errored
+            grid.kind = .dot(Palette.danger)
             label.text = message
         case .editing:
-            grid.style = .idle
+            grid.kind = .dot(StatusTone.input)
             label.text = "Editing queued message · Tap to cancel"
         }
     }

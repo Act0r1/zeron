@@ -215,6 +215,7 @@ impl LayoutFrame {
             boxes: out.boxes,
             links: out.links,
             scrollers: out.scrollers,
+            fades: out.fades,
             widgets: out.widgets,
             copy_text: r.core.copy_text.clone(),
         })

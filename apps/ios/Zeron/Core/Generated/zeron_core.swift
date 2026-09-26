@@ -4793,6 +4793,81 @@ public func FfiConverterTypeFaceData_lower(_ value: FaceData) -> RustBuffer {
 
 
 /**
+ * An overflow fade: runs whose baseline falls inside the rect's vertical
+ * band are painted through an alpha ramp — the text itself fades, so it
+ * works over any background.
+ */
+public struct Fade: Equatable, Hashable {
+    public var x: Float
+    public var y: Float
+    public var w: Float
+    public var h: Float
+    public var edge: FadeEdge
+    public var scroller: UInt32?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(x: Float, y: Float, w: Float, h: Float, edge: FadeEdge, scroller: UInt32?) {
+        self.x = x
+        self.y = y
+        self.w = w
+        self.h = h
+        self.edge = edge
+        self.scroller = scroller
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension Fade: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFade: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Fade {
+        return
+            try Fade(
+                x: FfiConverterFloat.read(from: &buf), 
+                y: FfiConverterFloat.read(from: &buf), 
+                w: FfiConverterFloat.read(from: &buf), 
+                h: FfiConverterFloat.read(from: &buf), 
+                edge: FfiConverterTypeFadeEdge.read(from: &buf), 
+                scroller: FfiConverterOptionUInt32.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: Fade, into buf: inout [UInt8]) {
+        FfiConverterFloat.write(value.x, into: &buf)
+        FfiConverterFloat.write(value.y, into: &buf)
+        FfiConverterFloat.write(value.w, into: &buf)
+        FfiConverterFloat.write(value.h, into: &buf)
+        FfiConverterTypeFadeEdge.write(value.edge, into: &buf)
+        FfiConverterOptionUInt32.write(value.scroller, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFade_lift(_ buf: RustBuffer) throws -> Fade {
+    return try FfiConverterTypeFade.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFade_lower(_ value: Fade) -> RustBuffer {
+    return FfiConverterTypeFade.lower(value)
+}
+
+
+/**
  * A workspace file or folder for `@` mentions.
  */
 public struct FileMatch: Equatable, Hashable {
@@ -6623,6 +6698,7 @@ public struct RowDisplay: Equatable, Hashable {
     public var links: [LinkHit]
     public var scrollers: [Scroller]
     public var widgets: [Widget]
+    public var fades: [Fade]
     /**
      * Plain text for copy / accessibility.
      */
@@ -6630,7 +6706,7 @@ public struct RowDisplay: Equatable, Hashable {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(key: UInt64, version: UInt64, width: Float, height: Float, text: String, runs: [TextRun], boxes: [BoxPrim], links: [LinkHit], scrollers: [Scroller], widgets: [Widget], 
+    public init(key: UInt64, version: UInt64, width: Float, height: Float, text: String, runs: [TextRun], boxes: [BoxPrim], links: [LinkHit], scrollers: [Scroller], widgets: [Widget], fades: [Fade], 
         /**
          * Plain text for copy / accessibility.
          */copyText: String) {
@@ -6644,6 +6720,7 @@ public struct RowDisplay: Equatable, Hashable {
         self.links = links
         self.scrollers = scrollers
         self.widgets = widgets
+        self.fades = fades
         self.copyText = copyText
     }
 
@@ -6673,6 +6750,7 @@ public struct FfiConverterTypeRowDisplay: FfiConverterRustBuffer {
                 links: FfiConverterSequenceTypeLinkHit.read(from: &buf), 
                 scrollers: FfiConverterSequenceTypeScroller.read(from: &buf), 
                 widgets: FfiConverterSequenceTypeWidget.read(from: &buf), 
+                fades: FfiConverterSequenceTypeFade.read(from: &buf), 
                 copyText: FfiConverterString.read(from: &buf)
         )
     }
@@ -6688,6 +6766,7 @@ public struct FfiConverterTypeRowDisplay: FfiConverterRustBuffer {
         FfiConverterSequenceTypeLinkHit.write(value.links, into: &buf)
         FfiConverterSequenceTypeScroller.write(value.scrollers, into: &buf)
         FfiConverterSequenceTypeWidget.write(value.widgets, into: &buf)
+        FfiConverterSequenceTypeFade.write(value.fades, into: &buf)
         FfiConverterString.write(value.copyText, into: &buf)
     }
 }
@@ -9407,6 +9486,83 @@ public func FfiConverterTypeFaceRole_lower(_ value: FaceRole) -> RustBuffer {
 
 
 
+/**
+ * Which way overflowing text fades out.
+ */
+
+public enum FadeEdge: Equatable, Hashable {
+    
+    /**
+     * Text fades to transparent across the rect, left → right, and is
+     * clipped at its right edge (single lines wider than their slot).
+     */
+    case trailing
+    /**
+     * Text fades to transparent across the rect, top → bottom (folded
+     * blocks whose last visible line continues).
+     */
+    case bottom
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension FadeEdge: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFadeEdge: FfiConverterRustBuffer {
+    typealias SwiftType = FadeEdge
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FadeEdge {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .trailing
+        
+        case 2: return .bottom
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: FadeEdge, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .trailing:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .bottom:
+            writeInt(&buf, Int32(2))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFadeEdge_lift(_ buf: RustBuffer) throws -> FadeEdge {
+    return try FfiConverterTypeFadeEdge.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFadeEdge_lower(_ value: FadeEdge) -> RustBuffer {
+    return FfiConverterTypeFadeEdge.lower(value)
+}
+
+
+
 
 public enum PendingKind: Equatable, Hashable {
     
@@ -11468,6 +11624,31 @@ fileprivate struct FfiConverterSequenceTypeFaceData: FfiConverterRustBuffer {
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeFaceData.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeFade: FfiConverterRustBuffer {
+    typealias SwiftType = [Fade]
+
+    public static func write(_ value: [Fade], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeFade.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [Fade] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [Fade]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeFade.read(from: &buf))
         }
         return seq
     }

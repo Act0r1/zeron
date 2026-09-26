@@ -114,6 +114,30 @@ pub struct Scroller {
     pub content_width: f32,
 }
 
+/// Which way overflowing text fades out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum FadeEdge {
+    /// Text fades to transparent across the rect, left → right, and is
+    /// clipped at its right edge (single lines wider than their slot).
+    Trailing,
+    /// Text fades to transparent across the rect, top → bottom (folded
+    /// blocks whose last visible line continues).
+    Bottom,
+}
+
+/// An overflow fade: runs whose baseline falls inside the rect's vertical
+/// band are painted through an alpha ramp — the text itself fades, so it
+/// works over any background.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct Fade {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+    pub edge: FadeEdge,
+    pub scroller: Option<u32>,
+}
+
 /// Native affordances the painter renders itself (icons, images, spinners).
 #[derive(Debug, Clone, PartialEq, uniffi::Enum)]
 pub enum WidgetKind {
@@ -161,6 +185,7 @@ pub struct RowDisplay {
     pub links: Vec<LinkHit>,
     pub scrollers: Vec<Scroller>,
     pub widgets: Vec<Widget>,
+    pub fades: Vec<Fade>,
     /// Plain text for copy / accessibility.
     pub copy_text: String,
 }
@@ -176,6 +201,7 @@ pub(crate) struct DisplayBuilder {
     pub links: Vec<LinkHit>,
     pub scrollers: Vec<Scroller>,
     pub widgets: Vec<Widget>,
+    pub fades: Vec<Fade>,
     /// Scroller that newly pushed primitives belong to.
     pub scroller: Option<u32>,
     next_widget: u32,
@@ -235,6 +261,17 @@ impl DisplayBuilder {
             scroller: self.scroller,
         });
         id
+    }
+
+    pub fn fade(&mut self, x: f32, y: f32, w: f32, h: f32, edge: FadeEdge) {
+        self.fades.push(Fade {
+            x,
+            y,
+            w,
+            h,
+            edge,
+            scroller: self.scroller,
+        });
     }
 
     pub fn begin_scroller(&mut self, x: f32, y: f32, w: f32, h: f32, content_width: f32) {

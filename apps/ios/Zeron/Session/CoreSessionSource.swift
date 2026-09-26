@@ -51,7 +51,8 @@ final class CoreSessionSource: SessionSource {
             chips.append(ComposerChip(id: "effort", title: reasoningLabel(level: r), symbol: "gauge.with.dots.needle.67percent"))
         }
         if let pr = row?.pullRequest {
-            chips.append(ComposerChip(id: "pr", title: "#\(pr.number)", symbol: pr.state == .merged ? "arrow.triangle.merge" : "arrow.triangle.pull", tint: pr.state == .open ? Palette.success : pr.state == .merged ? UIColor(hex: 0x8250DF) : Palette.danger))
+            let state: SessionRowVM.PR = switch pr.state { case .open: .open; case .merged: .merged; case .closed: .closed }
+            chips.append(ComposerChip(id: "pr", title: "\(pr.number)", symbol: nil, tint: PRBadgeView.tone(state), icon: PRIcon.image(side: 12)))
         } else if let b = row?.branch, !b.isEmpty {
             chips.append(ComposerChip(id: "branch", title: b, symbol: "arrow.triangle.branch"))
         }

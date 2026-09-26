@@ -17,7 +17,7 @@ use zeron_doc::schema::{MessageRole, SessionMessageEntry};
 use zeron_markdown::parser::{IncrementalParser, TopBlock};
 use zeron_text::WhiteSpace;
 
-use super::display::{ColorRole, DisplayBuilder, TextRun, WidgetKind};
+use super::display::{ColorRole, DisplayBuilder, FadeEdge, TextRun, WidgetKind};
 use super::markdown::{Ctx, PBlock, PText, Px, place, place_text, prepare_block, prepare_plain};
 use super::style::{Family, TYPE, Weight};
 
@@ -145,6 +145,8 @@ pub(crate) mod geom {
     pub const BUBBLE_PAD_X: f32 = 15.0;
     pub const BUBBLE_PAD_Y: f32 = 10.0;
     pub const BUBBLE_RADIUS: f32 = 20.0;
+    /// Width of a trailing overflow fade.
+    pub const FADE: f32 = 28.0;
     pub const BUBBLE_FOLD_LINES: usize = 8;
     pub const BUBBLE_FOLD_SHOW: usize = 6;
     pub const THUMB: f32 = 76.0;
@@ -685,14 +687,38 @@ pub(crate) fn place_row(core: &RowCore, gap: Gap, px: Px, width: f32, mut out: O
     top + body
 }
 
-/// Draw at most `max_lines` of `t`; returns the drawn height.
-fn place_text_lines(t: &PText, x: f32, y: f32, width: f32, max_lines: usize, out: &mut DisplayBuilder) -> f32 {
+/// Draw at most `max_lines` of `t`; returns the drawn height. Overflow
+/// fades instead of cutting: a one-line slot keeps the line unwrapped and
+/// fades it out at the slot's right edge; a multi-line slot fades its last
+/// visible line downward.
+fn place_text_lines(t: &PText, x: f32, y: f32, width: f32, max_lines: usize, px: Px, out: &mut DisplayBuilder) -> f32 {
     let runs_before = out.runs.len();
+    if max_lines == 1 && t.p.max_content_width() > width {
+        // One unwrapped line; runs starting past the slot are dropped, the
+        // straddling one is clipped by the fade.
+        place_text(t, x, y, t.p.max_content_width() + 1.0, Some(out));
+        let limit = x + width;
+        let first_baseline = y + t.base;
+        let mut i = runs_before;
+        while i < out.runs.len() {
+            let r = &out.runs[i];
+            if r.x >= limit || r.baseline > first_baseline + 0.5 {
+                out.runs.remove(i);
+            } else {
+                i += 1;
+            }
+        }
+        out.links.retain(|l| l.x < limit && l.y < y + t.lh);
+        let fw = px.v(geom::FADE).min(width);
+        out.fade(limit - fw, y, fw, t.lh, FadeEdge::Trailing);
+        return t.lh;
+    }
     let h = place_text(t, x, y, width, Some(out));
     let limit = y + max_lines as f32 * t.lh;
     if h > max_lines as f32 * t.lh {
         out.runs.truncate(runs_before + out.runs[runs_before..].iter().take_while(|r: &&TextRun| r.baseline < limit).count());
         out.links.retain(|l| l.y < limit);
+        out.fade(x, limit - t.lh, width, t.lh, FadeEdge::Bottom);
         return max_lines as f32 * t.lh;
     }
     h
@@ -727,7 +753,7 @@ fn place_user(u: &UserBubble, px: Px, x: f32, y: f32, cw: f32, out: Option<&mut 
         let bx = x + cw - bubble_w;
         let by = y + thumbs_h;
         out.fill(bx, by, bubble_w, bubble_h, px.v(BUBBLE_RADIUS).min(bubble_h / 2.0), ColorRole::UserBubble);
-        place_text_lines(&u.text, bx + pad_x, by + pad_y, text_w, shown, out);
+        place_text_lines(&u.text, bx + pad_x, by + pad_y, text_w, shown, px, out);
         if folds {
             let my = by + pad_y + text_h + px.v(4.0);
             let mw = u.more.p.max_content_width();
@@ -758,7 +784,7 @@ fn place_tools(t: &ToolGroup, px: Px, x: f32, y: f32, cw: f32, out: Option<&mut 
     );
     let sx = x + px.v(22.0);
     let sw = t.summary.p.max_content_width().min(cw - px.v(48.0));
-    place_text_lines(&t.summary, sx, y + (line - t.summary.lh) / 2.0, sw.max(1.0), 1, out);
+    place_text_lines(&t.summary, sx, y + (line - t.summary.lh) / 2.0, sw.max(1.0), 1, px, out);
     out.widget(
         WidgetKind::Disclosure { expanded: t.expanded },
         (x, y, (sw + px.v(48.0)).min(cw), line),
@@ -774,7 +800,7 @@ fn place_tools(t: &ToolGroup, px: Px, x: f32, y: f32, cw: f32, out: Option<&mut 
         let lw = l.label.p.max_content_width();
         place_text(&l.label, sx, ly + (line - l.label.lh) / 2.0, lw + 1.0, Some(out));
         let dx = sx + lw + px.v(8.0);
-        place_text_lines(&l.detail, dx, ly + (line - l.detail.lh) / 2.0, (x + cw - dx).max(1.0), 1, out);
+        place_text_lines(&l.detail, dx, ly + (line - l.detail.lh) / 2.0, (x + cw - dx).max(1.0), 1, px, out);
         if !l.full.is_empty() {
             out.widget(WidgetKind::Detail { title: l.title.clone() }, (x, ly, cw, line), Some(l.full.clone()));
         }

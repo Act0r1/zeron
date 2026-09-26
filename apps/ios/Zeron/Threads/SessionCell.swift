@@ -38,37 +38,31 @@ struct FolderRowVM: Hashable {
 }
 
 /// Two-line session row, laid out by hand: fixed height, no Auto Layout
-/// solving per cell, no text measurement beyond single-line labels.
+/// solving per cell, no text measurement beyond single-line labels. Status
+/// and PR badge follow the desktop sidebar.
 ///
-///   [mark]  Title of the session ··········· Working ▪︎
-///           ● project  branch  ⎇ 412
+///   [mark]  Title of the session ··········· ⠿ Working
+///           ● project  branch ··············· ⎇ 412
 final class SessionCell: UICollectionViewListCell {
     static var height: CGFloat { (62 * TypeScale.factor).rounded() }
 
-    private let unseenDot = UIView()
     private let harness = UIImageView()
-    private let title = UILabel()
+    private let title = FadingLabel()
     private let projectDot = UIView()
-    private let meta = UILabel()
+    private let meta = FadingLabel()
     private let time = UILabel()
-    private let prIcon = UIImageView()
-    private let status = DotGridView(style: .idle)
-    private let pin = UIImageView(image: UIImage(systemName: "pin.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 9, weight: .semibold)))
+    private let status = StatusGlyph()
+    private let prBadge = PRBadgeView()
     private var vm: SessionRowVM?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        unseenDot.backgroundColor = Palette.accent
-        unseenDot.layer.cornerRadius = 3
         projectDot.layer.cornerRadius = 3.5
         title.textColor = Palette.text
-        meta.textColor = Palette.secondary
         time.textAlignment = .right
         harness.contentMode = .scaleAspectFit
         harness.tintColor = Palette.text
-        prIcon.contentMode = .scaleAspectFit
-        pin.tintColor = Palette.tertiary
-        for v in [unseenDot, harness, title, projectDot, meta, time, prIcon, status, pin] { contentView.addSubview(v) }
+        for v in [harness, title, projectDot, meta, time, status, prBadge] as [UIView] { contentView.addSubview(v) }
         var bg = UIBackgroundConfiguration.listCell()
         bg.backgroundColor = .clear
         backgroundConfiguration = bg
@@ -90,54 +84,52 @@ final class SessionCell: UICollectionViewListCell {
         return attrs
     }
 
+    /// Desktop precedence: a failed send beats everything; then the live
+    /// state; unseen-and-finished reads "Done"; otherwise the time.
+    static func corner(_ vm: SessionRowVM) -> (word: String, color: UIColor, glyph: StatusGlyph.Kind)? {
+        if vm.sendFailed { return ("Failed", Palette.danger, .dot(Palette.danger)) }
+        switch vm.status {
+        case .working: return ("Working", StatusTone.working, .spinner)
+        case .awaiting: return ("Input", StatusTone.input, .dot(StatusTone.input))
+        case .errored: return ("Failed", StatusTone.failed, .dot(StatusTone.failed))
+        case .completed: return vm.unseen ? ("Done", StatusTone.done, .check(StatusTone.done)) : nil
+        case .idle: return nil
+        }
+    }
+
     func configure(_ vm: SessionRowVM) {
         self.vm = vm
         harness.image = BrandMarks.image(for: vm.harness ?? "claude-code", side: 20)
-        unseenDot.isHidden = !vm.unseen
         title.text = vm.title
         title.font = Fonts.ui(vm.unseen ? .sansSemibold : .sansMedium, TypeScale.size(16.5))
         title.textColor = vm.unseen || vm.status != .idle ? Palette.text : Palette.text.withAlphaComponent(0.88)
         projectDot.backgroundColor = Palette.projectDots[vm.colorIndex % Palette.projectDots.count]
         let metaText = NSMutableAttributedString(string: vm.projectName, attributes: [.font: Fonts.ui(.sans, TypeScale.size(13.5)), .foregroundColor: Palette.secondary])
-        if let n = vm.prNumber {
-            metaText.append(NSAttributedString(string: "  #\(n)", attributes: [.font: Fonts.ui(.sans, TypeScale.size(13.5)), .foregroundColor: Palette.tertiary]))
-        } else if let b = vm.branch, !b.isEmpty {
+        if let b = vm.branch, !b.isEmpty {
             metaText.append(NSAttributedString(string: "  " + b, attributes: [.font: Fonts.ui(.mono, TypeScale.size(12)), .foregroundColor: Palette.tertiary]))
         }
         meta.attributedText = metaText
-        if let pr = vm.pr {
-            prIcon.isHidden = false
-            prIcon.image = UIImage(systemName: pr == .merged ? "arrow.triangle.merge" : "arrow.triangle.pull", withConfiguration: UIImage.SymbolConfiguration(pointSize: 11, weight: .semibold))
-            prIcon.tintColor = switch pr {
-            case .open: Palette.success
-            case .draft: Palette.secondary
-            case .merged: UIColor(hex: 0x8250DF)
-            case .closed: Palette.danger
-            }
+        if let pr = vm.pr, let n = vm.prNumber {
+            prBadge.isHidden = false
+            prBadge.configure(number: n, state: pr, size: TypeScale.size(11))
         } else {
-            prIcon.isHidden = true
+            prBadge.isHidden = true
         }
-        pin.isHidden = !vm.pinned
-        // Desktop status words: Working / Input / Failed; otherwise the time.
-        let word: (String, UIColor, DotGridView.Style?)? = switch vm.status {
-        case .working: ("Working", Palette.accent, .working)
-        case .awaiting: ("Input", Palette.warning, .awaiting)
-        case .errored: ("Failed", Palette.danger, .errored)
-        case .idle, .completed: vm.sendFailed ? ("Not sent", Palette.danger, nil) : nil
-        }
-        if let (text, color, style) = word {
-            time.text = text
-            time.textColor = color
+        let corner = Self.corner(vm)
+        if let corner {
+            time.text = corner.word
+            time.textColor = corner.color
             time.font = Fonts.ui(.sansMedium, TypeScale.size(13))
-            status.isHidden = style == nil
-            if let style { status.style = style }
+            status.kind = corner.glyph
+            status.isHidden = false
         } else {
             time.text = vm.timeLabel
-            time.textColor = Palette.tertiary
-            time.font = Fonts.ui(.sans, TypeScale.size(13))
+            time.textColor = StatusTone.time
+            time.font = Fonts.ui(.sansMedium, TypeScale.size(13))
+            status.kind = .none
             status.isHidden = true
         }
-        accessibilityLabel = [vm.title, vm.projectName, word?.0].compactMap { $0 }.joined(separator: ", ")
+        accessibilityLabel = [vm.title, vm.projectName, corner?.word, prBadge.isHidden ? nil : prBadge.accessibilityLabel].compactMap { $0 }.joined(separator: ", ")
         accessibilityIdentifier = "session-\(vm.id)"
         setNeedsLayout()
     }
@@ -152,26 +144,25 @@ final class SessionCell: UICollectionViewListCell {
         let titleH = (22 * k).rounded()
         let metaY = (35 * k).rounded()
         let metaH = (18 * k).rounded()
-        unseenDot.frame = CGRect(x: left - 11, y: titleY + titleH / 2 - 3, width: 6, height: 6)
         harness.frame = CGRect(x: left, y: titleY + titleH / 2 - 10, width: 20, height: 20)
         let textX = left + 20 + 14
         let tw = ceil(time.sizeThatFits(CGSize(width: 140, height: 40)).width)
         time.frame = CGRect(x: b.width - right - tw, y: titleY, width: tw, height: titleH)
         var trailing = time.frame.minX - 10
         if !status.isHidden {
-            status.frame = CGRect(x: time.frame.minX - 6 - 11, y: titleY + titleH / 2 - 5.5, width: 11, height: 11)
+            status.frame = CGRect(x: time.frame.minX - 5 - 12, y: titleY + titleH / 2 - 6, width: 12, height: 12)
             trailing = status.frame.minX - 10
         }
         title.frame = CGRect(x: textX, y: titleY, width: max(0, trailing - textX), height: titleH)
         projectDot.frame = CGRect(x: textX, y: metaY + metaH / 2 - 3.5, width: 7, height: 7)
-        var x = textX + 7 + 7
-        if !pin.isHidden {
-            pin.frame = CGRect(x: x, y: metaY + metaH / 2 - 6.5, width: 11, height: 13)
-            x += 15
+        let x = textX + 7 + 7
+        var metaRight = b.width - right
+        if !prBadge.isHidden {
+            let size = prBadge.intrinsicContentSize
+            prBadge.frame = CGRect(x: b.width - right - size.width, y: metaY + (metaH - size.height) / 2, width: size.width, height: size.height)
+            metaRight = prBadge.frame.minX - 10
         }
-        let metaW = min(ceil(meta.sizeThatFits(CGSize(width: b.width, height: 40)).width), b.width - right - x - 22)
-        meta.frame = CGRect(x: x, y: metaY, width: max(0, metaW), height: metaH)
-        prIcon.frame = CGRect(x: meta.frame.maxX + 6, y: metaY + metaH / 2 - 7.5, width: 14, height: 15)
+        meta.frame = CGRect(x: x, y: metaY, width: max(0, metaRight - x), height: metaH)
     }
 }
 
@@ -218,14 +209,14 @@ final class SectionHeaderCell: UICollectionViewListCell {
         var title: String
         var count: Int
         var collapsed: Bool
-        var live: DotGridView.Style?
+        var live: StatusGlyph.Kind?
     }
 
     static var height: CGFloat { (40 * TypeScale.factor).rounded() }
-    private let title = UILabel()
+    private let title = FadingLabel()
     private let count = UILabel()
     private let chevron = UIImageView(image: UIImage(systemName: "chevron.down", withConfiguration: UIImage.SymbolConfiguration(pointSize: 11, weight: .semibold)))
-    private let live = DotGridView(style: .working)
+    private let live = StatusGlyph()
     private var shownCollapsed: Bool?
 
     override init(frame: CGRect) {
@@ -259,7 +250,7 @@ final class SectionHeaderCell: UICollectionViewListCell {
         title.text = s.title
         count.text = "\(s.count)"
         live.isHidden = s.live == nil
-        if let style = s.live { live.style = style }
+        if let kind = s.live { live.kind = kind }
         let rotate = { self.chevron.transform = s.collapsed ? CGAffineTransform(rotationAngle: -.pi / 2) : .identity }
         if shownCollapsed != nil, shownCollapsed != s.collapsed, window != nil {
             UIView.animate(withDuration: 0.3, delay: 0, usingSpringWithDamping: 0.85, initialSpringVelocity: 0, animations: rotate)
@@ -282,7 +273,7 @@ final class SectionHeaderCell: UICollectionViewListCell {
         title.frame = CGRect(x: 20, y: y, width: min(tw, b.width - 120), height: h)
         let cw = ceil(count.sizeThatFits(b.size).width)
         count.frame = CGRect(x: title.frame.maxX + 7, y: y, width: cw, height: h)
-        live.frame = CGRect(x: count.frame.maxX + 8, y: y + h / 2 - 5, width: 10, height: 10)
+        live.frame = CGRect(x: count.frame.maxX + 7, y: y + h / 2 - 6, width: 12, height: 12)
         chevron.frame = CGRect(x: b.width - 20 - 16, y: y, width: 16, height: h)
     }
 }

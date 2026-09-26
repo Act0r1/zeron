@@ -119,7 +119,7 @@ final class RowView: UIView {
         textElement = element
         // Scrollers: reuse views in order.
         while scrollers.count < d.scrollers.count {
-            let s = UIScrollView()
+            let s = FadingScrollView()
             s.showsHorizontalScrollIndicator = false
             s.showsVerticalScrollIndicator = false
             s.alwaysBounceHorizontal = false
@@ -184,7 +184,7 @@ final class RowView: UIView {
                 delegate?.rowView(self, imageFor: reference, into: iv)
                 view = iv
             case .spinner:
-                view = DotGridView(style: .working)
+                view = StatusGlyph(.spinner)
             case let .working(sinceMs, streaming):
                 view = WorkingIndicatorView(since: sinceMs.map { Date(timeIntervalSince1970: Double($0) / 1000) }, streaming: streaming)
             case let .detail(title):
@@ -290,13 +290,13 @@ final class DisclosureControl: UIControl {
     }
 }
 
-/// Tool state glyph: running dot-grid, failed cross, or a quiet done dot.
+/// Tool state glyph: running mini spinner, failed cross, or a quiet check.
 final class ToolStatusView: UIView {
     init(running: Bool, failed: Bool) {
         super.init(frame: .zero)
         isUserInteractionEnabled = false
         if running {
-            let grid = DotGridView(style: .working)
+            let grid = StatusGlyph(.spinner)
             grid.autoresizingMask = [.flexibleWidth, .flexibleHeight]
             addSubview(grid)
         } else {
@@ -316,9 +316,10 @@ final class ToolStatusView: UIView {
     }
 }
 
-/// Tail-of-turn indicator: dot-grid wave + "Working · 12s", ticking locally.
+/// Tail-of-turn indicator, as the desktop transcript trailer: the 3×3
+/// gradient spinner + "Working…" in muted text, elapsed time fainter.
 final class WorkingIndicatorView: UIView {
-    private let grid = DotGridView(style: .working)
+    private let grid = StatusGlyph(.trailer)
     private let label = UILabel()
     private let since: Date?
     private let word: String
@@ -330,7 +331,7 @@ final class WorkingIndicatorView: UIView {
         super.init(frame: .zero)
         isUserInteractionEnabled = false
         label.font = Fonts.ui(.sansMedium, UIFontMetrics(forTextStyle: .body).scaledValue(for: 13.5))
-        label.textColor = Palette.tertiary
+        label.textColor = Palette.secondary
         addSubview(grid)
         addSubview(label)
         tick()
@@ -340,7 +341,11 @@ final class WorkingIndicatorView: UIView {
 
     private func tick() {
         let secs = since.map { max(0, Int(Date().timeIntervalSince($0))) } ?? 0
-        label.text = secs > 0 ? "\(word) · \(StatusPill.elapsed(secs))" : "\(word)…"
+        let text = NSMutableAttributedString(string: "\(word)…", attributes: [.font: label.font as Any, .foregroundColor: Palette.secondary])
+        if secs > 0 {
+            text.append(NSAttributedString(string: "  \(StatusPill.elapsed(secs))", attributes: [.font: label.font as Any, .foregroundColor: Palette.tertiary]))
+        }
+        label.attributedText = text
         label.sizeToFit()
         setNeedsLayout()
     }

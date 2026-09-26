@@ -229,3 +229,17 @@ fn user_attachments_render_as_images_not_trailer_text() {
     assert!(d.text.contains("Fix the header spacing"));
     assert!(d.widgets.iter().any(|w| matches!(&w.kind, display::WidgetKind::Image { reference } if reference.ends_with("shot.png"))));
 }
+
+#[test]
+fn folded_user_message_fades_its_last_line() {
+    let mut w = worker(390.0);
+    let long = (0..40).map(|i| format!("line {i} of a long pasted prompt")).collect::<Vec<_>>().join("\n");
+    w.input = debug_input(vec![DebugEntry { id: "u".into(), user: true, text: long, streaming: false }], false);
+    let frame = w.pass();
+    let d = frame.display(0).unwrap();
+    let fade = d.fades.iter().find(|f| f.edge == display::FadeEdge::Bottom).expect("bottom fade");
+    // Exactly one shown line sits in the fade band (the "Show more" label is below it).
+    let in_band: Vec<f32> = d.runs.iter().map(|r| r.baseline).filter(|b| *b > fade.y && *b <= fade.y + fade.h).collect();
+    assert!(!in_band.is_empty(), "fade covers the last shown line");
+    assert!(in_band.iter().all(|b| (b - in_band[0]).abs() < 0.5));
+}

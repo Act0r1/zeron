@@ -100,7 +100,7 @@ final class AskAnythingAccessory: UIControl {
     private let onTap: () -> Void
     private let label = UILabel()
     private let summary = UILabel()
-    private let cells = DotGridView(style: .working)
+    private let cells = StatusGlyph()
     private let mark = UIImageView(image: UIImage(systemName: "plus", withConfiguration: UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)))
 
     init(onTap: @escaping () -> Void) {
@@ -161,7 +161,7 @@ final class AskAnythingAccessory: UIControl {
         if live.awaiting > 0 { parts.append("\(live.awaiting) need\(live.awaiting == 1 ? "s" : "") you") }
         summary.text = parts.joined(separator: " · ")
         cells.isHidden = parts.isEmpty
-        cells.style = live.working > 0 ? .working : .awaiting
+        cells.kind = live.working > 0 ? .spinner : .dot(StatusTone.input)
         accessibilityLabel = parts.isEmpty ? "New session" : "New session, " + parts.joined(separator: ", ")
     }
 

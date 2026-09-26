@@ -10,6 +10,10 @@ final class RowModel: @unchecked Sendable {
     /// Runs/boxes grouped by scroller (index 0 = the row canvas itself).
     let runsByLayer: [[Int]]
     let boxesByLayer: [[Int]]
+    /// Overflow fades per layer, each with the runs it masks. Those runs are
+    /// painted through the fade instead of in the plain pass.
+    let fadesByLayer: [[(fade: Int, runs: [Int])]]
+    private let fadedRun: Set<Int>
 
     init(display: RowDisplay, fonts: StyleFonts) {
         self.display = display
@@ -36,9 +40,77 @@ final class RowModel: @unchecked Sendable {
         for (i, box) in display.boxes.enumerated() {
             boxes[box.scroller.map { Int($0) + 1 } ?? 0].append(i)
         }
+        var fades = Array(repeating: [(fade: Int, runs: [Int])](), count: layers)
+        var faded = Set<Int>()
+        for (fi, f) in display.fades.enumerated() {
+            let layer = f.scroller.map { Int($0) + 1 } ?? 0
+            let masked = runs[layer].filter { i in
+                let r = display.runs[i]
+                guard !faded.contains(i), r.baseline > f.y, r.baseline <= f.y + f.h + 0.5 else { return false }
+                return f.edge == .bottom || r.x < f.x + f.w
+            }
+            faded.formUnion(masked)
+            fades[layer].append((fi, masked))
+        }
         self.lines = lines
         self.runsByLayer = runs
         self.boxesByLayer = boxes
+        self.fadesByLayer = fades
+        self.fadedRun = faded
+    }
+
+    /// Alpha ramp used to erase text across a fade (clear → opaque).
+    private static let ramp = CGGradient(colorSpace: CGColorSpaceCreateDeviceGray(), colorComponents: [0, 0, 0, 1], locations: [0, 1], count: 2)!
+    private static let rampBottom = CGGradient(colorSpace: CGColorSpaceCreateDeviceGray(), colorComponents: [0, 0, 0, 0.92], locations: [0, 1], count: 2)!
+
+    private func drawRun(_ i: Int, _ line: CTLine, in ctx: CGContext, hairline: CGFloat) {
+        let run = display.runs[i]
+        let color = Palette.color(run.color).cgColor
+        ctx.saveGState()
+        ctx.setFillColor(color)
+        ctx.translateBy(x: CGFloat(run.x), y: CGFloat(run.baseline))
+        ctx.scaleBy(x: 1, y: -1)
+        ctx.textPosition = .zero
+        CTLineDraw(line, ctx)
+        ctx.restoreGState()
+        if run.decoration != .none {
+            let y = run.decoration == .underline ? CGFloat(run.baseline) + 2 : CGFloat(run.baseline) - 5
+            ctx.setFillColor(color)
+            ctx.fill(CGRect(x: CGFloat(run.x), y: y, width: CGFloat(run.width), height: max(hairline, 1)))
+        }
+    }
+
+    /// Runs under a fade: painted into a transparency layer, clipped at a
+    /// trailing fade's end, then erased along the ramp — the text itself
+    /// fades, whatever the background.
+    private func drawFades(layer: Int, in ctx: CGContext, hairline: CGFloat) {
+        for (fi, runs) in fadesByLayer[layer] where !runs.isEmpty {
+            let f = display.fades[fi]
+            let rect = CGRect(x: CGFloat(f.x), y: CGFloat(f.y), width: CGFloat(f.w), height: CGFloat(f.h))
+            ctx.saveGState()
+            if f.edge == .trailing {
+                ctx.clip(to: CGRect(x: -100_000, y: rect.minY - 40, width: 100_000 + rect.maxX, height: rect.height + 80))
+            }
+            ctx.beginTransparencyLayer(auxiliaryInfo: nil)
+            for i in runs {
+                if let line = lines[i] { drawRun(i, line, in: ctx, hairline: hairline) }
+            }
+            ctx.setBlendMode(.destinationOut)
+            switch f.edge {
+            case .trailing:
+                ctx.saveGState()
+                ctx.clip(to: CGRect(x: rect.minX, y: rect.minY - 40, width: rect.width, height: rect.height + 80))
+                ctx.drawLinearGradient(Self.ramp, start: CGPoint(x: rect.minX, y: 0), end: CGPoint(x: rect.maxX, y: 0), options: [])
+                ctx.restoreGState()
+            case .bottom:
+                ctx.saveGState()
+                ctx.clip(to: CGRect(x: rect.minX - 40, y: rect.minY, width: rect.width + 80, height: rect.height + 40))
+                ctx.drawLinearGradient(Self.rampBottom, start: CGPoint(x: 0, y: rect.minY), end: CGPoint(x: 0, y: rect.maxY), options: [.drawsAfterEndLocation])
+                ctx.restoreGState()
+            }
+            ctx.endTransparencyLayer()
+            ctx.restoreGState()
+        }
     }
 
     /// Paint one layer (0 = row canvas, n = scroller n-1) in its coordinates.
@@ -75,7 +147,7 @@ final class RowModel: @unchecked Sendable {
             }
             ctx.textMatrix = .identity
             for i in runsByLayer[layer] {
-                guard let line = lines[i] else { continue }
+                guard let line = lines[i], !fadedRun.contains(i) else { continue }
                 let run = display.runs[i]
                 // Split a run straddling the veil boundary at the glyph edge.
                 var clip: CGRect?
@@ -100,20 +172,9 @@ final class RowModel: @unchecked Sendable {
                     ctx.clip(to: clip)
                 }
                 defer { if clip != nil { ctx.restoreGState() } }
-                let color = Palette.color(run.color).cgColor
-                ctx.saveGState()
-                ctx.setFillColor(color)
-                ctx.translateBy(x: CGFloat(run.x), y: CGFloat(run.baseline))
-                ctx.scaleBy(x: 1, y: -1)
-                ctx.textPosition = .zero
-                CTLineDraw(line, ctx)
-                ctx.restoreGState()
-                if run.decoration != .none {
-                    let y = run.decoration == .underline ? CGFloat(run.baseline) + 2 : CGFloat(run.baseline) - 5
-                    ctx.setFillColor(color)
-                    ctx.fill(CGRect(x: CGFloat(run.x), y: y, width: CGFloat(run.width), height: max(hairline, 1)))
-                }
+                drawRun(i, line, in: ctx, hairline: hairline)
             }
+            if case .fresh = pass {} else { drawFades(layer: layer, in: ctx, hairline: hairline) }
         }
     }
 }

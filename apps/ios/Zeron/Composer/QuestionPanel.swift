@@ -245,11 +245,10 @@ final class QueuePanel: UIView {
         thumb.clipsToBounds = true
         thumb.layer.cornerRadius = 6
         thumb.isHidden = item.thumbnail == nil
-        let label = UILabel()
+        let label = FadingLabel()
         label.text = item.gate.map { "\($0) · \(item.text)" } ?? item.text
         label.font = Fonts.ui(.sans, 15)
         label.textColor = Palette.text
-        label.lineBreakMode = .byTruncatingTail
         var sendConfig = UIButton.Configuration.plain()
         sendConfig.image = UIImage(systemName: "arrow.up.circle.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .regular))
         sendConfig.baseForegroundColor = Palette.text
