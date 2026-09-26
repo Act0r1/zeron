@@ -1,7 +1,8 @@
 import UIKit
 
-/// The 3×3 dot-grid status glyph. Animation is a Core Animation keyframe per
-/// dot (a diagonal wave) — rendered by the render server, zero main-thread
+/// The Zeron cell matrix: a 3×3 grid of rounded-square cells (the same cell
+/// shape as the Zeron mark). Animation is a Core Animation keyframe per cell
+/// (a diagonal wave) — rendered by the render server, zero main-thread
 /// work per frame, and it pauses itself off-screen.
 final class DotGridView: UIView {
     enum Style: Equatable {
@@ -36,13 +37,14 @@ final class DotGridView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         let side = min(bounds.width, bounds.height)
-        let d = max(1.6, side * 0.17)
+        let d = max(2, side * 0.26)
         let step = (side - d) / 2
         let ox = (bounds.width - side) / 2
         let oy = (bounds.height - side) / 2
         for (i, dot) in dots.enumerated() {
             dot.frame = CGRect(x: ox + CGFloat(i % 3) * step, y: oy + CGFloat(i / 3) * step, width: d, height: d)
-            dot.cornerRadius = d / 2
+            dot.cornerRadius = d * 0.3
+            dot.cornerCurve = .continuous
         }
     }
 
@@ -59,7 +61,7 @@ final class DotGridView: UIView {
     private func restyle() {
         let color: UIColor
         switch style {
-        case .working: color = Palette.secondary
+        case .working: color = Palette.accent
         case .awaiting: color = Palette.warning
         case .errored: color = Palette.danger
         case .idle: color = Palette.tertiary

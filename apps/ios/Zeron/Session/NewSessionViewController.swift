@@ -125,7 +125,7 @@ final class NewSessionViewController: UIViewController {
     private func refreshChips() {
         var chips: [ComposerChip] = []
         if let p = project {
-            chips.append(ComposerChip(id: "project", title: p.name, symbol: "folder", tint: Palette.projectDots[p.colorIndex % Palette.projectDots.count]))
+            chips.append(ComposerChip(id: "project", title: p.name, symbol: nil, icon: ComposerChip.dot(Palette.projectDots[p.colorIndex % Palette.projectDots.count])))
             if p.git {
                 chips.append(ComposerChip(id: "branch", title: draft.worktree ? "New worktree" : (draft.branch ?? "Current branch"), symbol: draft.worktree ? "square.split.bottomrightquarter" : "arrow.triangle.branch"))
             }
@@ -135,7 +135,7 @@ final class NewSessionViewController: UIViewController {
             chips.append(ComposerChip(id: "host", title: host?.name ?? "Choose host", symbol: "desktopcomputer"))
         }
         let model = models.first { $0.harness == draft.harness && $0.id == draft.model } ?? models.first { $0.harness == draft.harness }
-        chips.append(ComposerChip(id: "model", title: model?.label ?? HarnessNames.label(draft.harness), symbol: nil))
+        chips.append(ComposerChip(id: "model", title: model?.label ?? HarnessNames.label(draft.harness), symbol: nil, icon: BrandMarks.image(for: draft.harness, side: 13)))
         if let efforts = model?.efforts, !efforts.isEmpty {
             chips.append(ComposerChip(id: "effort", title: (draft.effort ?? efforts[efforts.count / 2]).capitalized, symbol: "gauge.with.dots.needle.67percent"))
         }

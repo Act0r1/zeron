@@ -45,7 +45,7 @@ final class CoreSessionSource: SessionSource {
         next.placeholder = "Message \(row?.harnessLabel ?? "the agent")"
         var chips: [ComposerChip] = []
         if let model = row?.modelLabel ?? row?.harnessLabel {
-            chips.append(ComposerChip(id: "model", title: model, symbol: nil))
+            chips.append(ComposerChip(id: "model", title: model, symbol: nil, icon: BrandMarks.image(for: row?.harness ?? "claude-code", side: 13)))
         }
         if let r = row?.reasoning, !r.isEmpty {
             chips.append(ComposerChip(id: "effort", title: reasoningLabel(level: r), symbol: "gauge.with.dots.needle.67percent"))

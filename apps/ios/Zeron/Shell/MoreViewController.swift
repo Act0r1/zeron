@@ -26,7 +26,7 @@ final class MoreViewController: UIViewController, UICollectionViewDelegate {
     init(app: AppModel) {
         self.app = app
         super.init(nibName: nil, bundle: nil)
-        title = "More"
+        title = "Settings"
     }
 
     required init?(coder: NSCoder) { fatalError() }

@@ -1,6 +1,6 @@
 import UIKit
 
-/// Projects as expandable groups (Capy's "Captains"): avatar tile, name,
+/// Projects as expandable groups: color rail, name,
 /// status glyph or unseen badge, time, and the project's sessions indented
 /// underneath. Expansion state persists per project.
 final class ProjectsViewController: UIViewController, UICollectionViewDelegate {
@@ -130,10 +130,10 @@ final class ProjectsViewController: UIViewController, UICollectionViewDelegate {
     }
 }
 
-/// Project group header: avatar tile, name, status/badge, time.
+/// Project group header: color rail, name over host, status/badge, time.
 final class ProjectCell: UICollectionViewListCell {
     static let height: CGFloat = 58
-    private let tile = UILabel()
+    private let tile = UIView()
     private let name = UILabel()
     private let device = UILabel()
     private let time = UILabel()
@@ -142,13 +142,9 @@ final class ProjectCell: UICollectionViewListCell {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        tile.font = Fonts.ui(.sansSemibold, 15)
-        tile.textColor = .white
-        tile.textAlignment = .center
-        tile.layer.cornerRadius = 8
-        tile.layer.cornerCurve = .continuous
+        tile.layer.cornerRadius = 2
         tile.clipsToBounds = true
-        name.font = Fonts.ui(.sansMedium, 18)
+        name.font = Fonts.ui(.sansMedium, 17)
         name.textColor = Palette.text
         device.font = Fonts.ui(.sans, 13)
         device.textColor = Palette.tertiary
@@ -175,14 +171,13 @@ final class ProjectCell: UICollectionViewListCell {
 
     override func updateConfiguration(using state: UICellConfigurationState) {
         var bg = UIBackgroundConfiguration.listCell().updated(for: state)
-        bg.backgroundColor = state.isHighlighted ? Palette.chip.withAlphaComponent(0.7) : .clear
-        bg.cornerRadius = 14
+        bg.backgroundColor = state.isHighlighted ? Palette.controlFill : .clear
+        bg.cornerRadius = 16
         bg.backgroundInsets = NSDirectionalEdgeInsets(top: 1, leading: 8, bottom: 1, trailing: 8)
         backgroundConfiguration = bg
     }
 
     func configure(_ p: AppModel.ProjectVM) {
-        tile.text = String(p.name.prefix(1)).uppercased()
         tile.backgroundColor = Palette.projectDots[p.colorIndex % Palette.projectDots.count]
         name.text = p.name
         device.text = p.device
@@ -202,7 +197,7 @@ final class ProjectCell: UICollectionViewListCell {
     override func layoutSubviews() {
         super.layoutSubviews()
         let b = contentView.bounds
-        tile.frame = CGRect(x: 20, y: (b.height - 30) / 2, width: 30, height: 30)
+        tile.frame = CGRect(x: 20, y: (b.height - 32) / 2, width: 4, height: 32)
         var right = b.width - 8
         let tw = ceil(time.sizeThatFits(b.size).width)
         time.frame = CGRect(x: right - tw, y: (b.height - 18) / 2, width: tw, height: 18)
@@ -213,11 +208,11 @@ final class ProjectCell: UICollectionViewListCell {
             right -= w + 8
         }
         if !status.isHidden {
-            status.frame = CGRect(x: right - 16, y: (b.height - 16) / 2, width: 16, height: 16)
-            right -= 24
+            status.frame = CGRect(x: right - 13, y: (b.height - 13) / 2, width: 13, height: 13)
+            right -= 21
         }
-        let nw = min(ceil(name.sizeThatFits(b.size).width), right - 62)
-        name.frame = CGRect(x: 62, y: (b.height - 24) / 2, width: nw, height: 24)
-        device.frame = CGRect(x: name.frame.maxX + 8, y: (b.height - 18) / 2 + 1, width: max(0, right - name.frame.maxX - 8), height: 18)
+        let x: CGFloat = 38
+        name.frame = CGRect(x: x, y: b.height / 2 - 21, width: max(0, right - x), height: 22)
+        device.frame = CGRect(x: x, y: b.height / 2 + 2, width: max(0, right - x), height: 17)
     }
 }

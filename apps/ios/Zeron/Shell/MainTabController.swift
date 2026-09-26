@@ -19,16 +19,16 @@ final class MainTabController: UITabBarController, UITabBarControllerDelegate {
         tabBar.tintColor = Palette.accent
         tabBarMinimizeBehavior = .onScrollDown
 
-        let projects = UITab(title: "Projects", image: UIImage(systemName: "square.grid.2x2"), identifier: "projects") { [app] _ in
+        let projects = UITab(title: "Projects", image: UIImage(systemName: "folder"), identifier: "projects") { [app] _ in
             Self.nav(ProjectsViewController(app: app))
         }
-        let sessions = UITab(title: "Sessions", image: UIImage(systemName: "list.bullet"), identifier: "sessions") { [app] _ in
+        let sessions = UITab(title: "Sessions", image: UIImage(systemName: "bubble.left.and.text.bubble.right"), identifier: "sessions") { [app] _ in
             Self.nav(SessionsViewController(app: app))
         }
         let prs = UITab(title: "PRs", image: UIImage(systemName: "arrow.triangle.pull"), identifier: "prs") { [app] _ in
             Self.nav(PullRequestsViewController(app: app))
         }
-        let more = UITab(title: "More", image: UIImage(systemName: "ellipsis"), identifier: "more") { [app] _ in
+        let more = UITab(title: "Settings", image: UIImage(systemName: "gearshape"), identifier: "more") { [app] _ in
             Self.nav(MoreViewController(app: app))
         }
         let search = UISearchTab { [app] _ in
@@ -40,6 +40,11 @@ final class MainTabController: UITabBarController, UITabBarControllerDelegate {
 
         bottomAccessory = accessory
         delegate = self
+        accessoryContent.update(app.live)
+        liveToken = app.observe { [weak self] in
+            guard let self else { return }
+            self.accessoryContent.update(self.app.live)
+        }
     }
 
     /// Search has its own bottom field; the composer accessory steps aside.
@@ -47,7 +52,9 @@ final class MainTabController: UITabBarController, UITabBarControllerDelegate {
         setAccessoryVisible(!(selectedTab is UISearchTab), animated: true)
     }
 
-    private lazy var accessory = UITabAccessory(contentView: AskAnythingAccessory { [weak self] in self?.presentNewSession() })
+    private lazy var accessoryContent = AskAnythingAccessory { [weak self] in self?.presentNewSession() }
+    private lazy var accessory = UITabAccessory(contentView: accessoryContent)
+    private var liveToken: AnyObject?
 
     /// Pushed sessions carry their own composer; the accessory steps aside.
     func setAccessoryVisible(_ visible: Bool, animated: Bool) {
@@ -92,52 +99,77 @@ final class MainTabController: UITabBarController, UITabBarControllerDelegate {
     }
 }
 
-/// The capsule above the tab bar. Tapping it opens the new-session composer.
+/// The capsule above the tab bar: the Zeron mark, "New session", and a live
+/// summary of what's running ("2 working · 1 needs you"). Tapping it opens the
+/// new-session composer.
 final class AskAnythingAccessory: UIControl {
     private let onTap: () -> Void
+    private let label = UILabel()
+    private let summary = UILabel()
+    private let cells = DotGridView(style: .working)
+    private let mark = UIImageView(image: ZeronMark.image(side: 18))
 
     init(onTap: @escaping () -> Void) {
         self.onTap = onTap
         super.init(frame: .zero)
-        accessibilityLabel = "New session"
         accessibilityIdentifier = "new-session"
         accessibilityTraits = .button
 
-        let plus = UIImageView(image: UIImage(systemName: "plus", withConfiguration: UIImage.SymbolConfiguration(pointSize: 15, weight: .medium)))
-        plus.tintColor = Palette.text
-        plus.contentMode = .center
+        mark.tintColor = Palette.accent
+        mark.contentMode = .center
         let plate = UIView()
-        plate.backgroundColor = Palette.chip.withAlphaComponent(0.8)
-        plate.layer.cornerRadius = 16
+        plate.backgroundColor = Palette.accentSoft
+        plate.layer.cornerRadius = 11
+        plate.layer.cornerCurve = .continuous
         plate.isUserInteractionEnabled = false
-        plate.addSubview(plus)
-        let label = UILabel()
-        label.text = "Ask anything"
-        label.font = Fonts.ui(.sans, 17)
-        label.textColor = Palette.secondary
-        for v in [plate, label, plus] { v.translatesAutoresizingMaskIntoConstraints = false }
-        addSubview(plate)
-        addSubview(label)
+        plate.addSubview(mark)
+        label.text = "New session"
+        label.font = Fonts.ui(.sansMedium, 16)
+        label.textColor = Palette.text
+        summary.font = Fonts.ui(.sansMedium, 13)
+        summary.textColor = Palette.secondary
+        summary.textAlignment = .right
+        cells.isHidden = true
+        for v in [plate, label, mark, summary, cells] as [UIView] { v.translatesAutoresizingMaskIntoConstraints = false }
+        for v in [plate, label, summary, cells] as [UIView] { addSubview(v) }
+        summary.setContentCompressionResistancePriority(.required, for: .horizontal)
         NSLayoutConstraint.activate([
-            plate.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            plate.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 7),
             plate.centerYAnchor.constraint(equalTo: centerYAnchor),
-            plate.widthAnchor.constraint(equalToConstant: 32),
-            plate.heightAnchor.constraint(equalToConstant: 32),
-            plus.centerXAnchor.constraint(equalTo: plate.centerXAnchor),
-            plus.centerYAnchor.constraint(equalTo: plate.centerYAnchor),
-            label.leadingAnchor.constraint(equalTo: plate.trailingAnchor, constant: 10),
+            plate.widthAnchor.constraint(equalToConstant: 34),
+            plate.heightAnchor.constraint(equalToConstant: 34),
+            mark.centerXAnchor.constraint(equalTo: plate.centerXAnchor),
+            mark.centerYAnchor.constraint(equalTo: plate.centerYAnchor),
+            label.leadingAnchor.constraint(equalTo: plate.trailingAnchor, constant: 11),
             label.centerYAnchor.constraint(equalTo: centerYAnchor),
-            label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -12),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: cells.leadingAnchor, constant: -10),
+            summary.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+            summary.centerYAnchor.constraint(equalTo: centerYAnchor),
+            cells.trailingAnchor.constraint(equalTo: summary.leadingAnchor, constant: -7),
+            cells.centerYAnchor.constraint(equalTo: centerYAnchor),
+            cells.widthAnchor.constraint(equalToConstant: 12),
+            cells.heightAnchor.constraint(equalToConstant: 12),
         ])
         addAction(UIAction { [weak self] _ in self?.onTap() }, for: .touchUpInside)
         registerForTraitChanges([UITraitTabAccessoryEnvironment.self]) { (self: AskAnythingAccessory, _) in
-            // Inline (minimized tab bar): drop the label, keep the plus.
+            // Inline (minimized tab bar): the mark and the live summary only.
             let inline = self.traitCollection.tabAccessoryEnvironment == .inline
-            label.alpha = inline ? 0 : 1
+            self.label.alpha = inline ? 0 : 1
         }
+        update(AppModel.LiveCounts())
     }
 
     required init?(coder: NSCoder) { fatalError() }
+
+    func update(_ live: AppModel.LiveCounts) {
+        var parts: [String] = []
+        if live.working > 0 { parts.append("\(live.working) working") }
+        if live.awaiting > 0 { parts.append("\(live.awaiting) need\(live.awaiting == 1 ? "s" : "") you") }
+        summary.text = parts.joined(separator: " · ")
+        cells.isHidden = parts.isEmpty
+        cells.style = live.working > 0 ? .working : .awaiting
+        accessibilityLabel = parts.isEmpty ? "New session" : "New session, " + parts.joined(separator: ", ")
+    }
 
     override var isHighlighted: Bool {
         didSet { UIView.animate(withDuration: 0.15) { self.alpha = self.isHighlighted ? 0.6 : 1 } }

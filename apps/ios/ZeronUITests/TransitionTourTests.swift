@@ -17,7 +17,7 @@ final class TransitionTourTests: XCTestCase {
         app.navigationBars.buttons.element(boundBy: 0).tap()
         sleep(2)
         // Tabs.
-        for tab in ["Projects", "PRs", "More", "Sessions"] {
+        for tab in ["Projects", "PRs", "Settings", "Sessions"] {
             app.tabBars.buttons[tab].tap()
             sleep(1)
         }

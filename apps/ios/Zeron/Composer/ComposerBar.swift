@@ -19,18 +19,33 @@ enum DeliveryMode: String {
     case interrupt
 }
 
-/// A context chip above the input (model, effort, branch…).
+/// A context chip in the composer toolbar (model, effort, branch…).
 struct ComposerChip: Equatable {
     let id: String
     let title: String
     let symbol: String?
     var tint: UIColor? = nil
+    /// Brand mark / custom glyph (takes precedence over `symbol`).
+    var icon: UIImage? = nil
+
+    /// A small filled circle (project color) as a chip glyph.
+    static func dot(_ color: UIColor, side: CGFloat = 8) -> UIImage {
+        UIGraphicsImageRenderer(size: CGSize(width: side, height: side)).image { ctx in
+            color.setFill()
+            ctx.cgContext.fillEllipse(in: CGRect(x: 0, y: 0, width: side, height: side))
+        }.withRenderingMode(.alwaysOriginal)
+    }
 }
 
-/// The glass composer: [+] [growing text] [send/stop/queue], with staged
-/// image thumbnails inside the capsule and a context-chip strip above it
-/// while focused. One glass surface — its corner radius and height morph
-/// with content, so there are no view swaps to stutter.
+/// The composer. One glass surface with two states that morph into each
+/// other (the same views re-anchor inside a spring animation):
+///
+/// - resting: a single-line capsule — [+]  Message…  [↑]
+/// - active (focused, or holding a draft/photos): a card — photos, full-width
+///   text, and a toolbar row inside the glass: [+] [model] [effort] [branch] … [Send]
+///
+/// The action button is one control that becomes Send, Queue/Steer (a labelled
+/// pill while an agent works) or Stop.
 final class ComposerBar: UIView, UITextViewDelegate {
     enum Action: Equatable {
         case send
@@ -49,37 +64,42 @@ final class ComposerBar: UIView, UITextViewDelegate {
     var mentionSearch: ((String) async -> [FileMatch])?
 
     // State
-    var running = false { didSet { refreshAction() } }
-    var canSteer = false { didSet { refreshAction() } }
-    var preferredDelivery: DeliveryMode = .queue { didSet { refreshAction() } }
+    var running = false { didSet { if running != oldValue { refreshAction(animated: true) } } }
+    var canSteer = false { didSet { refreshAction(animated: false) } }
+    var preferredDelivery: DeliveryMode = .queue { didSet { refreshAction(animated: false) } }
     var placeholder = "Message" { didSet { placeholderLabel.text = placeholder } }
     var chips: [ComposerChip] = [] { didSet { if chips != oldValue { rebuildChips() } } }
     /// Chips with a menu open it on tap (native, glassy, lazily loaded).
     var chipMenus: [String: () -> UIMenu?] = [:] { didSet { applyChipMenus() } }
-    /// Chips stay visible without focus (new-session canvas).
-    var chipsAlwaysVisible = false { didSet { updateChipsVisibility(animated: false) } }
-    private(set) var images: [StagedImage] = [] { didSet { rebuildThumbs(); refreshAction() } }
+    /// Stay in the card state even when idle (new-session canvas).
+    var chipsAlwaysVisible = false { didSet { updateMode(animated: false) } }
+    private(set) var images: [StagedImage] = [] { didSet { rebuildThumbs(); refreshAction(animated: true); updateMode(animated: true) } }
 
     var text: String {
         get { textView.text }
         set {
             textView.text = newValue
             textChanged()
+            updateMode(animated: false)
         }
     }
 
     let textView = UITextView()
-    private let glass = Glass.surface(interactive: false, radius: 24)
+    private let glass = Glass.surface(interactive: false, radius: 25)
     private let placeholderLabel = UILabel()
     private let attachButton = UIButton(type: .system)
-    private let actionButton = UIButton(type: .custom)
+    private let actionButton = UIButton(type: .system)
     private let thumbs = UIStackView()
     private let thumbsScroll = UIScrollView()
+    private let toolbar = UIView()
     private let chipStrip = UIStackView()
     private let chipScroll = UIScrollView()
     private var textHeight: NSLayoutConstraint!
     private var thumbsHeight: NSLayoutConstraint!
-    private var chipsHeight: NSLayoutConstraint!
+    private var toolbarHeight: NSLayoutConstraint!
+    private var compactConstraints: [NSLayoutConstraint] = []
+    private var cardConstraints: [NSLayoutConstraint] = []
+    private(set) var isCard = false
     private var currentAction: Action = .send
     private var mentions = MentionIndex()
     private let suggestions = MentionSuggestions()
@@ -87,7 +107,9 @@ final class ComposerBar: UIView, UITextViewDelegate {
     private var mentionTask: Task<Void, Never>?
 
     private let font = Fonts.ui(.sans, UIFontMetrics(forTextStyle: .body).scaledValue(for: 16.5))
-    private var maxLines: Int { traitCollection.verticalSizeClass == .compact ? 3 : 7 }
+    private var maxLines: Int { traitCollection.verticalSizeClass == .compact ? 3 : 8 }
+    private static let control: CGFloat = 34
+    private static let compactHeight: CGFloat = 50
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -97,21 +119,13 @@ final class ComposerBar: UIView, UITextViewDelegate {
     required init?(coder: NSCoder) { fatalError() }
 
     private func build() {
-        // Chip strip above the capsule.
-        chipScroll.showsHorizontalScrollIndicator = false
-        chipScroll.clipsToBounds = false
-        chipScroll.translatesAutoresizingMaskIntoConstraints = false
-        chipStrip.axis = .horizontal
-        chipStrip.spacing = 8
-        chipStrip.distribution = .fill
-        chipStrip.alignment = .center
-        chipStrip.translatesAutoresizingMaskIntoConstraints = false
-        chipScroll.addSubview(chipStrip)
-        addSubview(chipScroll)
-
         glass.translatesAutoresizingMaskIntoConstraints = false
         addSubview(glass)
         let content = glass.contentView
+        // Tapping anywhere on the surface focuses the input.
+        let tap = UITapGestureRecognizer(target: self, action: #selector(focusFromTap))
+        tap.cancelsTouchesInView = false
+        glass.addGestureRecognizer(tap)
 
         thumbsScroll.showsHorizontalScrollIndicator = false
         thumbsScroll.translatesAutoresizingMaskIntoConstraints = false
@@ -121,9 +135,12 @@ final class ComposerBar: UIView, UITextViewDelegate {
         thumbsScroll.addSubview(thumbs)
         content.addSubview(thumbsScroll)
 
-        var attach = UIButton.Configuration.plain()
-        attach.image = UIImage(systemName: "plus", withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .medium))
+        var attach = UIButton.Configuration.filled()
+        attach.image = UIImage(systemName: "plus", withConfiguration: UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold))
         attach.baseForegroundColor = Palette.text
+        attach.baseBackgroundColor = Palette.controlFill
+        attach.cornerStyle = .capsule
+        attach.contentInsets = .zero
         attachButton.configuration = attach
         attachButton.accessibilityLabel = "Attach"
         attachButton.accessibilityIdentifier = "composer-attach"
@@ -137,10 +154,11 @@ final class ComposerBar: UIView, UITextViewDelegate {
 
         textView.font = font
         textView.textColor = Palette.text
+        textView.tintColor = Palette.accent
         textView.backgroundColor = .clear
         textView.delegate = self
         textView.isScrollEnabled = false
-        textView.textContainerInset = UIEdgeInsets(top: 11, left: 0, bottom: 11, right: 0)
+        textView.textContainerInset = UIEdgeInsets(top: 14, left: 0, bottom: 14, right: 0)
         textView.textContainer.lineFragmentPadding = 0
         textView.accessibilityIdentifier = "composer-input"
         textView.translatesAutoresizingMaskIntoConstraints = false
@@ -154,33 +172,35 @@ final class ComposerBar: UIView, UITextViewDelegate {
         placeholderLabel.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(placeholderLabel)
 
+        toolbar.translatesAutoresizingMaskIntoConstraints = false
+        toolbar.clipsToBounds = true
+        content.addSubview(toolbar)
+        chipScroll.showsHorizontalScrollIndicator = false
+        chipScroll.translatesAutoresizingMaskIntoConstraints = false
+        chipStrip.axis = .horizontal
+        chipStrip.spacing = 6
+        chipStrip.alignment = .center
+        chipStrip.translatesAutoresizingMaskIntoConstraints = false
+        chipScroll.addSubview(chipStrip)
+        toolbar.addSubview(chipScroll)
+
         actionButton.translatesAutoresizingMaskIntoConstraints = false
-        actionButton.layer.cornerRadius = 17
-        actionButton.layer.cornerCurve = .continuous
         actionButton.accessibilityIdentifier = "composer-send"
         actionButton.addAction(UIAction { [weak self] _ in self?.primaryAction() }, for: .touchUpInside)
+        actionButton.setContentHuggingPriority(.required, for: .horizontal)
         content.addSubview(actionButton)
 
-        textHeight = textView.heightAnchor.constraint(equalToConstant: 44)
+        let c = Self.control
+        textHeight = textView.heightAnchor.constraint(equalToConstant: Self.compactHeight)
         thumbsHeight = thumbsScroll.heightAnchor.constraint(equalToConstant: 0)
-        chipsHeight = chipScroll.heightAnchor.constraint(equalToConstant: 0)
+        toolbarHeight = toolbar.heightAnchor.constraint(equalToConstant: 0)
         NSLayoutConstraint.activate([
-            chipScroll.topAnchor.constraint(equalTo: topAnchor),
-            chipScroll.leadingAnchor.constraint(equalTo: leadingAnchor),
-            chipScroll.trailingAnchor.constraint(equalTo: trailingAnchor),
-            chipsHeight,
-            chipStrip.topAnchor.constraint(equalTo: chipScroll.contentLayoutGuide.topAnchor),
-            chipStrip.bottomAnchor.constraint(equalTo: chipScroll.contentLayoutGuide.bottomAnchor),
-            chipStrip.leadingAnchor.constraint(equalTo: chipScroll.contentLayoutGuide.leadingAnchor, constant: 2),
-            chipStrip.trailingAnchor.constraint(equalTo: chipScroll.contentLayoutGuide.trailingAnchor, constant: -2),
-            chipStrip.heightAnchor.constraint(equalTo: chipScroll.frameLayoutGuide.heightAnchor),
-
-            glass.topAnchor.constraint(equalTo: chipScroll.bottomAnchor),
+            glass.topAnchor.constraint(equalTo: topAnchor),
             glass.leadingAnchor.constraint(equalTo: leadingAnchor),
             glass.trailingAnchor.constraint(equalTo: trailingAnchor),
             glass.bottomAnchor.constraint(equalTo: bottomAnchor),
 
-            thumbsScroll.topAnchor.constraint(equalTo: content.topAnchor, constant: 0),
+            thumbsScroll.topAnchor.constraint(equalTo: content.topAnchor),
             thumbsScroll.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 12),
             thumbsScroll.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
             thumbsHeight,
@@ -190,30 +210,61 @@ final class ComposerBar: UIView, UITextViewDelegate {
             thumbs.trailingAnchor.constraint(equalTo: thumbsScroll.contentLayoutGuide.trailingAnchor),
             thumbs.heightAnchor.constraint(equalTo: thumbsScroll.frameLayoutGuide.heightAnchor),
 
-            attachButton.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 4),
-            attachButton.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -2),
-            attachButton.widthAnchor.constraint(equalToConstant: 44),
-            attachButton.heightAnchor.constraint(equalToConstant: 44),
-
             textView.topAnchor.constraint(equalTo: thumbsScroll.bottomAnchor),
-            textView.leadingAnchor.constraint(equalTo: attachButton.trailingAnchor, constant: 0),
-            textView.trailingAnchor.constraint(equalTo: actionButton.leadingAnchor, constant: -8),
-            textView.bottomAnchor.constraint(equalTo: content.bottomAnchor),
             textHeight,
+            toolbar.topAnchor.constraint(equalTo: textView.bottomAnchor),
+            toolbar.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            toolbar.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            toolbar.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+            toolbarHeight,
 
             placeholderLabel.leadingAnchor.constraint(equalTo: textView.leadingAnchor),
             placeholderLabel.trailingAnchor.constraint(lessThanOrEqualTo: textView.trailingAnchor),
-            placeholderLabel.topAnchor.constraint(equalTo: textView.topAnchor, constant: 11),
+            placeholderLabel.topAnchor.constraint(equalTo: textView.topAnchor, constant: 14),
 
-            actionButton.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -6),
-            actionButton.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -5),
-            actionButton.widthAnchor.constraint(equalToConstant: 34),
-            actionButton.heightAnchor.constraint(equalToConstant: 34),
+            attachButton.widthAnchor.constraint(equalToConstant: c),
+            attachButton.heightAnchor.constraint(equalToConstant: c),
+            actionButton.heightAnchor.constraint(equalToConstant: c),
+            actionButton.widthAnchor.constraint(greaterThanOrEqualToConstant: c),
+
+            chipScroll.leadingAnchor.constraint(equalTo: attachButton.trailingAnchor, constant: 8),
+            chipScroll.trailingAnchor.constraint(equalTo: actionButton.leadingAnchor, constant: -8),
+            chipScroll.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
+            chipScroll.heightAnchor.constraint(equalToConstant: c),
+            chipStrip.topAnchor.constraint(equalTo: chipScroll.contentLayoutGuide.topAnchor),
+            chipStrip.bottomAnchor.constraint(equalTo: chipScroll.contentLayoutGuide.bottomAnchor),
+            chipStrip.leadingAnchor.constraint(equalTo: chipScroll.contentLayoutGuide.leadingAnchor),
+            chipStrip.trailingAnchor.constraint(equalTo: chipScroll.contentLayoutGuide.trailingAnchor),
+            chipStrip.heightAnchor.constraint(equalTo: chipScroll.frameLayoutGuide.heightAnchor),
         ])
+        // Resting capsule: controls at the capsule's ends, text between them.
+        compactConstraints = [
+            attachButton.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 8),
+            attachButton.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -8),
+            actionButton.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -8),
+            actionButton.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -8),
+            textView.leadingAnchor.constraint(equalTo: attachButton.trailingAnchor, constant: 10),
+            textView.trailingAnchor.constraint(equalTo: actionButton.leadingAnchor, constant: -8),
+        ]
+        // Card: full-width text, controls in the toolbar row.
+        cardConstraints = [
+            attachButton.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 10),
+            attachButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
+            actionButton.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -10),
+            actionButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
+            textView.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
+            textView.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -16),
+        ]
+        NSLayoutConstraint.activate(compactConstraints)
+        chipScroll.alpha = 0
         suggestions.isHidden = true
         suggestions.translatesAutoresizingMaskIntoConstraints = false
         suggestions.onPick = { [weak self] file in self?.insertMention(file) }
-        refreshAction()
+        refreshAction(animated: false)
+    }
+
+    @objc private func focusFromTap() {
+        if !textView.isFirstResponder { textView.becomeFirstResponder() }
     }
 
     /// Suggestions float above the bar, outside its bounds — so they live in
@@ -225,8 +276,38 @@ final class ComposerBar: UIView, UITextViewDelegate {
         NSLayoutConstraint.activate([
             suggestions.leadingAnchor.constraint(equalTo: leadingAnchor),
             suggestions.trailingAnchor.constraint(equalTo: trailingAnchor),
-            suggestions.bottomAnchor.constraint(equalTo: chipScroll.topAnchor, constant: -6),
+            suggestions.bottomAnchor.constraint(equalTo: topAnchor, constant: -8),
         ])
+    }
+
+    // MARK: Resting ↔ card
+
+    private var wantsCard: Bool {
+        chipsAlwaysVisible || textView.isFirstResponder || hasContent || !images.isEmpty
+    }
+
+    private func updateMode(animated: Bool) {
+        let card = wantsCard
+        guard card != isCard else { return }
+        isCard = card
+        let change = {
+            if card {
+                NSLayoutConstraint.deactivate(self.compactConstraints)
+                NSLayoutConstraint.activate(self.cardConstraints)
+            } else {
+                NSLayoutConstraint.deactivate(self.cardConstraints)
+                NSLayoutConstraint.activate(self.compactConstraints)
+            }
+            self.toolbarHeight.constant = card ? 50 : 0
+            self.chipScroll.alpha = card ? 1 : 0
+            self.textView.textContainerInset = card ? UIEdgeInsets(top: 14, left: 0, bottom: 6, right: 0) : UIEdgeInsets(top: 14, left: 0, bottom: 14, right: 0)
+            self.glass.cornerConfiguration = .uniformCorners(radius: .fixed(card ? 26 : 25))
+            self.recomputeTextHeight()
+            self.onHeightChange?()
+            self.superview?.layoutIfNeeded()
+        }
+        guard animated, window != nil, !UIAccessibility.isReduceMotionEnabled else { return change() }
+        UIView.animate(withDuration: 0.42, delay: 0, usingSpringWithDamping: 0.86, initialSpringVelocity: 0, options: [.allowUserInteraction, .beginFromCurrentState], animations: change)
     }
 
     // MARK: Mentions
@@ -304,45 +385,33 @@ final class ComposerBar: UIView, UITextViewDelegate {
     override func resignFirstResponder() -> Bool { textView.resignFirstResponder() }
 
     func textViewDidBeginEditing(_ textView: UITextView) {
-        updateChipsVisibility(animated: true)
+        updateMode(animated: true)
         onFocusChange?(true)
     }
 
     func textViewDidEndEditing(_ textView: UITextView) {
-        updateChipsVisibility(animated: true)
+        updateMode(animated: true)
         onFocusChange?(false)
-    }
-
-    private func updateChipsVisibility(animated: Bool) {
-        let show = !chips.isEmpty && (chipsAlwaysVisible || textView.isFirstResponder)
-        let target: CGFloat = show ? 42 : 0
-        guard chipsHeight.constant != target || chipScroll.alpha != (show ? 1 : 0) else { return }
-        let change = {
-            self.chipsHeight.constant = target
-            self.chipScroll.alpha = show ? 1 : 0
-            self.onHeightChange?()
-            self.superview?.layoutIfNeeded()
-        }
-        if animated {
-            UIView.animate(withDuration: 0.32, delay: 0, usingSpringWithDamping: 0.9, initialSpringVelocity: 0, options: [.allowUserInteraction, .beginFromCurrentState], animations: change)
-        } else {
-            change()
-        }
     }
 
     private func rebuildChips() {
         chipStrip.arrangedSubviews.forEach { $0.removeFromSuperview() }
         for chip in chips {
-            var config = UIButton.Configuration.glass()
+            var config = UIButton.Configuration.filled()
             config.title = chip.title
-            config.image = chip.symbol.flatMap { UIImage(systemName: $0, withConfiguration: UIImage.SymbolConfiguration(pointSize: 12, weight: .medium)) }
-            config.imagePadding = 5
+            if let icon = chip.icon {
+                config.image = icon
+            } else if let symbol = chip.symbol {
+                config.image = UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: 11.5, weight: .semibold))
+            }
+            config.imagePadding = 6
             config.baseForegroundColor = chip.tint ?? Palette.text
+            config.baseBackgroundColor = Palette.controlFill
             config.cornerStyle = .capsule
-            config.contentInsets = NSDirectionalEdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12)
+            config.contentInsets = NSDirectionalEdgeInsets(top: 7, leading: 11, bottom: 7, trailing: 11)
             config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attrs in
                 var a = attrs
-                a.font = Fonts.ui(.sansMedium, 13.5)
+                a.font = Fonts.ui(chip.id == "branch" ? .mono : .sansMedium, chip.id == "branch" ? 12.5 : 13.5)
                 return a
             }
             let b = UIButton(configuration: config)
@@ -356,7 +425,6 @@ final class ComposerBar: UIView, UITextViewDelegate {
             chipStrip.addArrangedSubview(b)
         }
         applyChipMenus()
-        updateChipsVisibility(animated: false)
     }
 
     private func applyChipMenus() {
@@ -383,33 +451,38 @@ final class ComposerBar: UIView, UITextViewDelegate {
             let iv = UIImageView(image: img.thumbnail)
             iv.contentMode = .scaleAspectFill
             iv.clipsToBounds = true
-            iv.layer.cornerRadius = 12
+            iv.layer.cornerRadius = 14
             iv.layer.cornerCurve = .continuous
+            iv.layer.borderWidth = 1 / max(1, traitCollection.displayScale)
+            iv.layer.borderColor = Palette.hairline.resolvedColor(with: traitCollection).cgColor
             iv.isUserInteractionEnabled = true
             iv.translatesAutoresizingMaskIntoConstraints = false
-            iv.widthAnchor.constraint(equalToConstant: 60).isActive = true
-            let remove = UIButton(type: .system)
-            remove.setImage(UIImage(systemName: "xmark.circle.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 16, weight: .semibold)), for: .normal)
-            remove.tintColor = .white
-            remove.layer.shadowOpacity = 0.3
-            remove.layer.shadowRadius = 2
-            remove.layer.shadowOffset = .zero
+            iv.widthAnchor.constraint(equalToConstant: 56).isActive = true
+            iv.heightAnchor.constraint(equalToConstant: 56).isActive = true
+            var x = UIButton.Configuration.filled()
+            x.image = UIImage(systemName: "xmark", withConfiguration: UIImage.SymbolConfiguration(pointSize: 8, weight: .bold))
+            x.baseBackgroundColor = UIColor.black.withAlphaComponent(0.55)
+            x.baseForegroundColor = .white
+            x.cornerStyle = .capsule
+            x.contentInsets = .zero
+            let remove = UIButton(configuration: x)
             remove.accessibilityLabel = "Remove image"
             remove.translatesAutoresizingMaskIntoConstraints = false
             remove.addAction(UIAction { [weak self] _ in
-                UIView.animate(withDuration: 0.2) { self?.images.removeAll { $0.id == img.id } }
+                UIView.animate(withDuration: 0.25) { self?.images.removeAll { $0.id == img.id } }
             }, for: .touchUpInside)
             iv.addSubview(remove)
             NSLayoutConstraint.activate([
-                remove.topAnchor.constraint(equalTo: iv.topAnchor, constant: 2),
-                remove.trailingAnchor.constraint(equalTo: iv.trailingAnchor, constant: -2),
+                remove.topAnchor.constraint(equalTo: iv.topAnchor, constant: 4),
+                remove.trailingAnchor.constraint(equalTo: iv.trailingAnchor, constant: -4),
+                remove.widthAnchor.constraint(equalToConstant: 18),
+                remove.heightAnchor.constraint(equalToConstant: 18),
             ])
             thumbs.addArrangedSubview(iv)
         }
-        thumbsHeight.constant = images.isEmpty ? 0 : 72
+        thumbsHeight.constant = images.isEmpty ? 0 : 68
         thumbs.layoutMargins = UIEdgeInsets(top: 12, left: 0, bottom: 0, right: 0)
         thumbs.isLayoutMarginsRelativeArrangement = true
-        glass.cornerConfiguration = .uniformCorners(radius: .fixed(images.isEmpty && textHeight.constant <= 44 ? 22 : 24))
         onHeightChange?()
     }
 
@@ -425,30 +498,35 @@ final class ComposerBar: UIView, UITextViewDelegate {
         if mentionQuery != nil { updateMentionQuery() }
     }
 
-    func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
-        true
+    private func recomputeTextHeight() {
+        let width = max(40, textView.bounds.width)
+        let fitting = textView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude)).height
+        let insets = textView.textContainerInset.top + textView.textContainerInset.bottom
+        let maxHeight = font.lineHeight * CGFloat(maxLines) + insets
+        let minHeight: CGFloat = isCard ? 46 : Self.compactHeight
+        textView.isScrollEnabled = fitting > maxHeight
+        textHeight.constant = min(max(minHeight, fitting), maxHeight)
     }
 
     private func textChanged() {
         placeholderLabel.isHidden = !textView.text.isEmpty
-        let width = max(40, textView.bounds.width)
-        let fitting = textView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude)).height
-        let maxHeight = font.lineHeight * CGFloat(maxLines) + 22
-        let height = min(max(44, fitting), maxHeight)
-        textView.isScrollEnabled = fitting > maxHeight
-        if abs(textHeight.constant - height) > 0.5 {
-            textHeight.constant = height
+        let before = textHeight.constant
+        updateMode(animated: true)
+        recomputeTextHeight()
+        if abs(textHeight.constant - before) > 0.5 {
             UIView.animate(withDuration: 0.18, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction]) {
                 self.onHeightChange?()
                 self.superview?.layoutIfNeeded()
             }
         }
-        refreshAction()
+        refreshAction(animated: true)
     }
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        if textView.bounds.width > 0, textHeight.constant == 44, !textView.text.isEmpty { textChanged() }
+        if textView.bounds.width > 0, !textView.text.isEmpty, abs(textView.contentSize.height - textHeight.constant) > 1 {
+            recomputeTextHeight()
+        }
     }
 
     // MARK: Action button
@@ -457,30 +535,54 @@ final class ComposerBar: UIView, UITextViewDelegate {
         !textView.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !images.isEmpty
     }
 
-    private func refreshAction() {
+    private func refreshAction(animated: Bool) {
         let action: Action = running ? (hasContent ? .queue : .stop) : .send
         let enabled = action == .stop || hasContent
+        let steering = action == .queue && preferredDelivery == .steer && canSteer
+        var config = UIButton.Configuration.filled()
+        config.cornerStyle = .capsule
         let symbol: String
         switch action {
-        case .send: symbol = "arrow.up"
-        case .queue: symbol = preferredDelivery == .steer && canSteer ? "arrow.turn.down.right" : "arrow.up"
-        case .stop: symbol = "stop.fill"
+        case .send:
+            symbol = "arrow.up"
+            config.baseBackgroundColor = enabled ? Palette.accent : Palette.controlFill
+            config.baseForegroundColor = enabled ? .white : Palette.tertiary
+            config.contentInsets = .zero
+        case .queue:
+            symbol = steering ? "arrow.turn.down.right" : "text.line.last.and.arrowtriangle.forward"
+            config.baseBackgroundColor = Palette.accent
+            config.baseForegroundColor = .white
+            config.title = steering ? "Steer" : "Queue"
+            config.imagePadding = 5
+            config.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 12, bottom: 0, trailing: 13)
+            config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { a in
+                var a = a
+                a.font = Fonts.ui(.sansSemibold, 14)
+                return a
+            }
+        case .stop:
+            symbol = "stop.fill"
+            config.baseBackgroundColor = Palette.text
+            config.baseForegroundColor = Palette.background
+            config.contentInsets = .zero
         }
-        let config = UIImage.SymbolConfiguration(pointSize: action == .stop ? 12 : 15, weight: .bold)
-        let image = UIImage(systemName: symbol, withConfiguration: config)
-        if currentAction != action {
-            actionButton.setImage(image, for: .normal)
+        config.image = UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: action == .stop ? 11 : action == .queue ? 12 : 15, weight: .bold))
+        let changed = currentAction != action
+        currentAction = action
+        let apply = {
+            self.actionButton.configuration = config
+            self.actionButton.isEnabled = enabled
+            self.superview?.layoutIfNeeded()
+        }
+        if animated, changed, window != nil {
+            UIView.animate(withDuration: 0.32, delay: 0, usingSpringWithDamping: 0.8, initialSpringVelocity: 0, options: [.allowUserInteraction, .beginFromCurrentState], animations: apply)
             actionButton.imageView?.addSymbolEffect(.bounce.byLayer, options: .nonRepeating)
         } else {
-            actionButton.setImage(image, for: .normal)
+            apply()
         }
-        currentAction = action
-        actionButton.tintColor = enabled ? Palette.background : Palette.tertiary
-        actionButton.backgroundColor = enabled ? Palette.text : Palette.chip
-        actionButton.isEnabled = enabled
         switch action {
         case .send: actionButton.accessibilityLabel = "Send message"
-        case .queue: actionButton.accessibilityLabel = preferredDelivery == .steer ? "Steer" : "Queue message"
+        case .queue: actionButton.accessibilityLabel = steering ? "Steer" : "Queue message"
         case .stop: actionButton.accessibilityLabel = "Stop response"
         }
         // Long-press offers the other delivery modes mid-turn.
@@ -489,10 +591,10 @@ final class ComposerBar: UIView, UITextViewDelegate {
                 UIAction(title: "Queue for next turn", image: UIImage(systemName: "text.line.last.and.arrowtriangle.forward")) { [weak self] _ in self?.send(.queue) },
             ]
             if canSteer {
-                items.append(UIAction(title: "Steer now", image: UIImage(systemName: "arrow.turn.down.right")) { [weak self] _ in self?.send(.steer) })
+                items.append(UIAction(title: "Steer now", subtitle: "Deliver into the running turn", image: UIImage(systemName: "arrow.turn.down.right")) { [weak self] _ in self?.send(.steer) })
             }
             items.append(UIAction(title: "Stop and send", image: UIImage(systemName: "stop.circle"), attributes: .destructive) { [weak self] _ in self?.send(.interrupt) })
-            actionButton.menu = UIMenu(title: "Deliver while working", children: items)
+            actionButton.menu = UIMenu(title: "While the agent works", children: items)
             actionButton.showsMenuAsPrimaryAction = false
         } else {
             actionButton.menu = nil

@@ -23,6 +23,11 @@ final class AppModel {
         var sessions: [SessionRowVM]
     }
 
+    struct LiveCounts: Equatable {
+        var working = 0
+        var awaiting = 0
+    }
+
     struct PullRequestGroup: Hashable {
         let title: String
         var sessions: [SessionRowVM]
@@ -34,6 +39,8 @@ final class AppModel {
     private(set) var pullRequests: [PullRequestGroup] = []
     private(set) var archived: [SessionRowVM] = []
     private(set) var connectivity: Connectivity?
+    /// Front-page sessions that are working / waiting on the user.
+    private(set) var live = LiveCounts()
     private var rows: [String: SessionRow] = [:]
     private var rawProjects: [ProjectView] = []
     private var workspaceRevision: UInt64 = 0
@@ -257,8 +264,15 @@ final class AppModel {
             PullRequestGroup(title: "Closed", sessions: pr.closed.map(vm)),
         ]
         let archivedVMs = ws.archived.map(vm)
+        var counts = LiveCounts()
+        var seen = Set<String>()
+        for row in page.sessions + page.sectionSessions.values.flatMap({ $0 }) where seen.insert(row.id).inserted {
+            if row.status == .working { counts.working += 1 }
+            if row.status == .awaiting { counts.awaiting += 1 }
+        }
         rows = all
-        let changed = page != frontPage || projectVMs != projects || prGroups != pullRequests || archivedVMs != archived
+        let changed = page != frontPage || projectVMs != projects || prGroups != pullRequests || archivedVMs != archived || counts != live
+        live = counts
         frontPage = page
         projects = projectVMs
         pullRequests = prGroups

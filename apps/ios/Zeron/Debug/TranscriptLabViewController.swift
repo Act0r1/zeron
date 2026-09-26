@@ -26,7 +26,7 @@ final class TranscriptLabViewController: UIViewController {
         composer.translatesAutoresizingMaskIntoConstraints = false
         composer.placeholder = "Message Claude"
         composer.chips = [
-            ComposerChip(id: "model", title: "Opus 4.5", symbol: nil),
+            ComposerChip(id: "model", title: "Opus 4.5", symbol: nil, icon: BrandMarks.image(for: "claude-code", side: 13)),
             ComposerChip(id: "effort", title: "High", symbol: "gauge.with.dots.needle.67percent"),
             ComposerChip(id: "branch", title: "ios-rewrite", symbol: "arrow.triangle.branch"),
         ]
