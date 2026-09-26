@@ -73,7 +73,10 @@ Zeron/
 | `-big` / `-huge` | Demo transcripts with 120 / 600 turns |
 | `-route chat:<id>` / `new` / `projects` / `prs` / `more` / `search` | Open a screen at launch |
 | `-signedout` | Clear stored credentials |
-| `-dev <userId> <orgId> [-edge <url>]` | Dev bearer against an `AUTH_MODE=dev` edge (e.g. `wrangler dev`) |
+| `-dev <userId> <orgId> [-edge <url>]` | Dev bearer against an `AUTH_MODE=dev` edge (e.g. `wrangler dev`); not persisted |
+| `-harness <id>` | Default harness for new sessions (`mock` for live-stack tests) |
+| `-bench` (with `-lab`) | Display-link fling benchmark; writes `Documents/bench.json` |
+| `-measureopen` | Session open latency; writes `Documents/open.json` |
 | `-lab [-turns N] [-autostream] [-autoscroll] [-top] [-meter]` | Transcript lab over fixture markdown, with an on-screen hitch meter |
 
 ## Tests
@@ -88,6 +91,19 @@ xcodebuild … -only-testing:ZeronTests/LineBreakAccuracyTests test
 xcodebuild … -only-testing:ZeronUITests/SessionFlowTests test
 xcodebuild … -only-testing:ZeronUITests/ScrollPerformanceTests test
 ```
+
+Live stack (real edge + headless engine; see `ZeronUITests/LiveStackTests.swift`):
+
+```sh
+(cd edge && npx wrangler dev --port 27650 --var AUTH_MODE:dev) &
+ZERON_DATA_DIR=/tmp/e2e ZERON_IPC_PORT=27811 ZERON_EDGE_URL=http://localhost:27650 \
+  ZERON_EDGE_TOKEN=alice@org1 ZERON_ORG_ID=org1 ZERON_HARNESS=mock target/debug/zeron headless &
+TEST_RUNNER_ZERON_LIVE_EDGE=http://localhost:27650 xcodebuild … -only-testing:ZeronUITests/LiveStackTests test
+```
+
+The test launches the app with `-harness mock`: a chat's configured harness
+wins over the engine's `ZERON_HARNESS` default, so without it a real agent
+would run.
 
 ## TestFlight release
 
