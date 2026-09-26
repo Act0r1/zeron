@@ -13,6 +13,9 @@ final class NewProjectViewController: UIViewController, UICollectionViewDelegate
     private let status = UILabel()
     private let useButton = UIButton(type: .system)
 
+    /// Called with the new project's id (the new-session canvas selects it).
+    var onCreated: ((String) -> Void)?
+
     init(app: AppModel) {
         self.app = app
         super.init(nibName: nil, bundle: nil)
@@ -148,7 +151,9 @@ final class NewProjectViewController: UIViewController, UICollectionViewDelegate
         let git = listing?.entries.contains { $0.name == ".git" } ?? false
         useButton.configuration?.showsActivityIndicator = true
         Task { @MainActor in
-            let ok = await app.createProject(deviceId: device.id, path: path, gitDetected: git)
+            let created = await app.createProject(deviceId: device.id, path: path, gitDetected: git)
+            let ok = created != nil
+            if let created { onCreated?(created) }
             useButton.configuration?.showsActivityIndicator = false
             if ok { dismiss(animated: true) } else { status.text = "Couldn't create the project on \(device.name)." }
         }

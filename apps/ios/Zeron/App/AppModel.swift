@@ -12,31 +12,13 @@ final class AppModel {
         var sectionSessions: [String: [SessionRowVM]] = [:]
     }
 
-    struct ProjectVM: Hashable {
-        let id: String
-        var name: String
-        var device: String
-        var colorIndex: Int
-        var status: SessionRowVM.Status
-        var unseen: Int
-        var timeLabel: String
-        var sessions: [SessionRowVM]
-    }
-
     struct LiveCounts: Equatable {
         var working = 0
         var awaiting = 0
     }
 
-    struct PullRequestGroup: Hashable {
-        let title: String
-        var sessions: [SessionRowVM]
-    }
-
     private(set) var client: CoreClient?
     private(set) var frontPage = FrontPage()
-    private(set) var projects: [ProjectVM] = []
-    private(set) var pullRequests: [PullRequestGroup] = []
     private(set) var archived: [SessionRowVM] = []
     private(set) var connectivity: Connectivity?
     /// Front-page sessions that are working / waiting on the user.
@@ -164,8 +146,6 @@ final class AppModel {
         client = nil
         Credentials.clearStored()
         frontPage = FrontPage()
-        projects = []
-        pullRequests = []
         clock?.invalidate()
     }
 
@@ -244,24 +224,10 @@ final class AppModel {
         }
         page.sessions = ws.front.recent.map(vm)
         rawProjects = ws.projects
-        let projectVMs = ws.projects.map { p in
-            ProjectVM(
-                id: p.id,
-                name: p.name,
-                device: (p.deviceName ?? p.deviceId) + (p.deviceOnline ? "" : " · offline"),
-                colorIndex: Int(p.colorIndex),
-                status: Self.status(p.indicator),
-                unseen: Int(p.unseenCount),
-                timeLabel: p.sessions.first?.timeLabel ?? "",
-                sessions: p.sessions.map(vm)
-            )
+        // Sessions reachable only through their project still resolve by id.
+        for p in ws.projects {
+            for r in p.sessions where all[r.id] == nil { all[r.id] = r }
         }
-        let pr = ws.pullRequests
-        let prGroups = [
-            PullRequestGroup(title: "Open", sessions: pr.open.map(vm)),
-            PullRequestGroup(title: "Merged", sessions: pr.merged.map(vm)),
-            PullRequestGroup(title: "Closed", sessions: pr.closed.map(vm)),
-        ]
         let archivedVMs = ws.archived.map(vm)
         var counts = LiveCounts()
         var seen = Set<String>()
@@ -270,11 +236,9 @@ final class AppModel {
             if row.status == .awaiting { counts.awaiting += 1 }
         }
         rows = all
-        let changed = page != frontPage || projectVMs != projects || prGroups != pullRequests || archivedVMs != archived || counts != live
+        let changed = page != frontPage || archivedVMs != archived || counts != live
         live = counts
         frontPage = page
-        projects = projectVMs
-        pullRequests = prGroups
         archived = archivedVMs
         if changed { observers.values.forEach { $0() } }
     }
@@ -399,15 +363,15 @@ final class AppModel {
         try? await client?.listFolders(deviceId: deviceId, path: path)
     }
 
-    func createProject(deviceId: String, path: String, gitDetected: Bool) async -> Bool {
-        guard let client else { return false }
+    func createProject(deviceId: String, path: String, gitDetected: Bool) async -> String? {
+        guard let client else { return nil }
         do {
-            _ = try await client.createProject(deviceId: deviceId, path: path, gitDetected: gitDetected)
+            let id = try await client.createProject(deviceId: deviceId, path: path, gitDetected: gitDetected)
             refreshWorkspace()
-            return true
+            return id
         } catch {
             NSLog("create project failed: \(error)")
-            return false
+            return nil
         }
     }
 

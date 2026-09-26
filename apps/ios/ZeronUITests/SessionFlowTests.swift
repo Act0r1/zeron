@@ -102,12 +102,11 @@ final class SessionFlowTests: XCTestCase {
     func testTabsAndSearch() {
         let app = launch()
         XCTAssertTrue(app.staticTexts["Sessions"].waitForExistence(timeout: 10))
-        app.tabBars.buttons["Projects"].tap()
-        XCTAssertTrue(app.navigationBars["Projects"].waitForExistence(timeout: 5))
-        snapshot(app, "projects")
-        app.tabBars.buttons["PRs"].tap()
-        XCTAssertTrue(app.navigationBars["Pull Requests"].waitForExistence(timeout: 5))
-        snapshot(app, "pull-requests")
+        app.tabBars.buttons["Settings"].tap()
+        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
+        snapshot(app, "settings")
+        app.tabBars.buttons["Sessions"].tap()
+        XCTAssertTrue(app.navigationBars["Sessions"].waitForExistence(timeout: 5))
     }
 
     func testNewSessionFromAccessory() {
@@ -153,9 +152,13 @@ final class SessionFlowTests: XCTestCase {
     }
 
     func testNewProjectFolderBrowser() {
-        let app = launch(["-route", "projects"])
-        let add = app.buttons["new-project"]
-        XCTAssertTrue(add.waitForExistence(timeout: 10))
+        // New projects are created from the new-session project picker.
+        let app = launch(["-route", "new"])
+        let chip = app.buttons["composer-chip-project"]
+        XCTAssertTrue(chip.waitForExistence(timeout: 10))
+        chip.tap()
+        let add = app.buttons["New Project…"]
+        XCTAssertTrue(add.waitForExistence(timeout: 5))
         add.tap()
         let use = app.buttons["use-folder"]
         XCTAssertTrue(use.waitForExistence(timeout: 5))
@@ -165,7 +168,8 @@ final class SessionFlowTests: XCTestCase {
         firstFolder.tap()
         XCTAssertTrue(use.waitForExistence(timeout: 5))
         use.tap()
-        XCTAssertTrue(add.waitForExistence(timeout: 10), "sheet dismissed after creating")
+        XCTAssertTrue(chip.waitForExistence(timeout: 10), "sheet dismissed after creating")
+        XCTAssertFalse(use.exists)
     }
 
     func testToolGroupExpandsAndShowsDetail() {

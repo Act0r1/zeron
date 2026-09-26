@@ -170,6 +170,17 @@ final class NewSessionViewController: UIViewController {
                 self.draft.hostId = self.draft.hostId ?? self.app.hostOptions.first(where: \.online)?.id ?? self.app.hostOptions.first?.id
                 self.refreshChips()
             },
+            UIAction(title: "New Project…", image: UIImage(systemName: "folder.badge.plus")) { [weak self] _ in
+                guard let self else { return }
+                let vc = NewProjectViewController(app: self.app)
+                vc.onCreated = { [weak self] id in
+                    self?.draft.projectId = id
+                    self?.draft.hostId = nil
+                    self?.draft.branch = nil
+                    self?.refreshChips()
+                }
+                self.present(UINavigationController(rootViewController: vc), animated: true)
+            },
         ]))
         return UIMenu(title: "Project", children: sections)
     }

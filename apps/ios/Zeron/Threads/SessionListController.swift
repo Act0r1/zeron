@@ -1,7 +1,7 @@
 import UIKit
 
 /// Shared list machinery for every session list (front page, folders,
-/// projects, PRs, search): diffable by id, reconfigure-in-place on content
+/// search): diffable by id, reconfigure-in-place on content
 /// changes, fixed row heights, swipe + context actions.
 class SessionListController: UIViewController, UICollectionViewDelegate {
     enum Item: Hashable {
@@ -17,8 +17,6 @@ class SessionListController: UIViewController, UICollectionViewDelegate {
     private(set) var folders: [String: FolderRowVM] = [:]
     private var headers: [String: String] = [:]
     private var token: AnyObject?
-    /// Rows indent under a group header (projects screen).
-    var indentedSections: Set<String> = []
     /// Show drag handles in edit mode (Pinned).
     var reorderable = false
     /// Headers are disclosure rows that fold their section (front page).
@@ -50,7 +48,6 @@ class SessionListController: UIViewController, UICollectionViewDelegate {
 
         let sessionReg = UICollectionView.CellRegistration<SessionCell, String> { [weak self] cell, path, id in
             guard let self, let vm = self.sessions[id] else { return }
-            cell.indent = self.indentedSections.contains(self.dataSource.sectionIdentifier(for: path.section) ?? "") ? 30 : 0
             cell.configure(vm)
             cell.accessories = self.reorderable ? [.reorder(displayed: .whenEditing)] : []
         }
@@ -424,18 +421,6 @@ final class FolderViewController: SessionListController {
         })
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         present(alert, animated: true)
-    }
-}
-
-final class PullRequestsViewController: SessionListController {
-    override func viewDidLoad() {
-        super.viewDidLoad()
-        title = "Pull Requests"
-        navigationItem.largeTitleDisplayMode = .always
-    }
-
-    override func buildSections() -> [(id: String, header: String?, folders: [FolderRowVM], sessions: [SessionRowVM])] {
-        app.pullRequests.filter { !$0.sessions.isEmpty }.map { ($0.title, $0.title.uppercased(), [], $0.sessions) }
     }
 }
 

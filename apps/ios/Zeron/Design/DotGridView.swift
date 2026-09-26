@@ -1,7 +1,6 @@
 import UIKit
 
-/// The Zeron cell matrix: a 3×3 grid of rounded-square cells (the same cell
-/// shape as the Zeron mark). Animation is a Core Animation keyframe per cell
+/// The status glyph: a 3×3 grid of rounded-square cells. Animation is a Core Animation keyframe per cell
 /// (a diagonal wave) — rendered by the render server, zero main-thread
 /// work per frame, and it pauses itself off-screen.
 final class DotGridView: UIView {

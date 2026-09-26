@@ -55,7 +55,6 @@ final class SessionCell: UICollectionViewListCell {
     private let status = DotGridView(style: .idle)
     private let pin = UIImageView(image: UIImage(systemName: "pin.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 9, weight: .semibold)))
     private var vm: SessionRowVM?
-    var indent: CGFloat = 0 { didSet { setNeedsLayout() } }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -146,7 +145,7 @@ final class SessionCell: UICollectionViewListCell {
     override func layoutSubviews() {
         super.layoutSubviews()
         let b = contentView.bounds
-        let left: CGFloat = 20 + indent
+        let left: CGFloat = 20
         let right: CGFloat = 20
         let k = TypeScale.factor
         let titleY = (10 * k).rounded()

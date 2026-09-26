@@ -32,7 +32,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             DispatchQueue.main.async {
                 if route.hasPrefix("chat:") { tabs.openSession(String(route.dropFirst(5))) }
                 if route == "new" { tabs.presentNewSession() }
-                if let tab = ["projects", "prs", "more", "search"].first(where: { route == $0 }) {
+                if let tab = ["more", "search"].first(where: { route == $0 }) {
                     tabs.selectedTab = tabs.tabs.first { $0.identifier == tab } ?? tabs.tabs.last
                 }
             }

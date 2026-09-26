@@ -34,8 +34,8 @@ Zeron/
                workspace snapshots to view models; Keychain credentials)
   Core/        Generated UniFFI bindings; Fonts (the exact bytes Rust measures,
                registered with CoreText) + CoreText fallback measurer
-  Design/      Palette (Zeron color roles → light/dark), Glass helpers, Zeron
-               mark + cell-matrix status glyph, harness brand marks
+  Design/      Palette (Zeron color roles → light/dark), Glass helpers,
+               cell-grid status glyph, harness brand marks
   Transcript/  TranscriptListView (virtualized scroll host over LayoutFrame),
                RowView/RowModel (CoreText painter for Rust display lists,
                streaming veil), FrameRelay
@@ -43,10 +43,10 @@ Zeron/
                canvas
   Composer/    ComposerBar (glass capsule ⇄ card with inline context chips;
                send/queue/steer/stop), question and queue panels, attachments
-  Threads/     Sessions (foldable sidebar sections)/PRs/search lists,
-               Projects groups, cells
-  Shell/       Tab bar (+ search tab, "New session" accessory with live
-               summary), Settings, sign-in
+  Threads/     Sessions (foldable sidebar sections)/folder/search lists,
+               cells, new-project folder browser
+  Shell/       Tab bar (Sessions, Settings, search; "New session" accessory
+               with live summary), sign-in
   Debug/       Transcript lab + hitch meter
 ```
 
@@ -73,7 +73,7 @@ Zeron/
 | `-demo` | Offline demo workspace (Rust `DemoHost`: registry, docs, streaming replies) |
 | `-fast` / `-longreply` | Demo stream speed / reply length |
 | `-big` / `-huge` | Demo transcripts with 120 / 600 turns |
-| `-route chat:<id>` / `new` / `projects` / `prs` / `more` / `search` | Open a screen at launch |
+| `-route chat:<id>` / `new` / `more` / `search` | Open a screen at launch |
 | `-signedout` | Clear stored credentials |
 | `-dev <userId> <orgId> [-edge <url>]` | Dev bearer against an `AUTH_MODE=dev` edge (e.g. `wrangler dev`); not persisted |
 | `-harness <id>` | Default harness for new sessions (`mock` for live-stack tests) |

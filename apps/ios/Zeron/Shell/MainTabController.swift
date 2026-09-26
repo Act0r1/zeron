@@ -19,14 +19,8 @@ final class MainTabController: UITabBarController, UITabBarControllerDelegate {
         tabBar.tintColor = Palette.accent
         tabBarMinimizeBehavior = .onScrollDown
 
-        let projects = UITab(title: "Projects", image: UIImage(systemName: "folder"), identifier: "projects") { [app] _ in
-            Self.nav(ProjectsViewController(app: app))
-        }
         let sessions = UITab(title: "Sessions", image: UIImage(systemName: "bubble.left.and.text.bubble.right"), identifier: "sessions") { [app] _ in
             Self.nav(SessionsViewController(app: app))
-        }
-        let prs = UITab(title: "PRs", image: UIImage(systemName: "arrow.triangle.pull"), identifier: "prs") { [app] _ in
-            Self.nav(PullRequestsViewController(app: app))
         }
         let more = UITab(title: "Settings", image: UIImage(systemName: "gearshape"), identifier: "more") { [app] _ in
             Self.nav(MoreViewController(app: app))
@@ -35,7 +29,7 @@ final class MainTabController: UITabBarController, UITabBarControllerDelegate {
             Self.nav(SearchViewController(app: app))
         }
         search.automaticallyActivatesSearch = true
-        tabs = [projects, sessions, prs, more, search]
+        tabs = [sessions, more, search]
         selectedTab = sessions
 
         bottomAccessory = accessory
@@ -99,7 +93,7 @@ final class MainTabController: UITabBarController, UITabBarControllerDelegate {
     }
 }
 
-/// The capsule above the tab bar: the Zeron mark, "New session", and a live
+/// The capsule above the tab bar: a plus, "New session", and a live
 /// summary of what's running ("2 working · 1 needs you"). Tapping it opens the
 /// new-session composer.
 final class AskAnythingAccessory: UIControl {
@@ -107,7 +101,7 @@ final class AskAnythingAccessory: UIControl {
     private let label = UILabel()
     private let summary = UILabel()
     private let cells = DotGridView(style: .working)
-    private let mark = UIImageView(image: ZeronMark.image(side: 18))
+    private let mark = UIImageView(image: UIImage(systemName: "plus", withConfiguration: UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)))
 
     init(onTap: @escaping () -> Void) {
         self.onTap = onTap
@@ -152,7 +146,7 @@ final class AskAnythingAccessory: UIControl {
         ])
         addAction(UIAction { [weak self] _ in self?.onTap() }, for: .touchUpInside)
         registerForTraitChanges([UITraitTabAccessoryEnvironment.self]) { (self: AskAnythingAccessory, _) in
-            // Inline (minimized tab bar): the mark and the live summary only.
+            // Inline (minimized tab bar): the plus and the live summary only.
             let inline = self.traitCollection.tabAccessoryEnvironment == .inline
             self.label.alpha = inline ? 0 : 1
         }
