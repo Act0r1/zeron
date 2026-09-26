@@ -74,6 +74,13 @@ class SessionListController: UIViewController, UICollectionViewDelegate {
         }
         token = app.observe { [weak self] in self?.reload(animated: true) }
         reload(animated: false)
+        // Text size changes: fixed row heights change with the category.
+        registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (self: SessionListController, _) in
+            var s = self.dataSource.snapshot()
+            s.reconfigureItems(s.itemIdentifiers)
+            self.dataSource.apply(s, animatingDifferences: false)
+            self.collectionView.collectionViewLayout.invalidateLayout()
+        }
         // Pull to re-probe sync (health + room redial) when a network looks stale.
         collectionView.refreshControl = UIRefreshControl(frame: .zero, primaryAction: UIAction { [weak self] action in
             self?.app.willEnterForeground()

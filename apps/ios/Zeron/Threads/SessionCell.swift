@@ -40,7 +40,7 @@ struct FolderRowVM: Hashable {
 /// Two-line session row, laid out by hand: fixed height, no Auto Layout
 /// solving per cell, no text measurement beyond single-line labels.
 final class SessionCell: UICollectionViewListCell {
-    static let height: CGFloat = 60
+    static var height: CGFloat { (60 * TypeScale.factor).rounded() }
 
     private let dot = UIView()
     private let title = UILabel()
@@ -56,11 +56,11 @@ final class SessionCell: UICollectionViewListCell {
     override init(frame: CGRect) {
         super.init(frame: frame)
         dot.layer.cornerRadius = 4.5
-        title.font = Fonts.ui(.sansMedium, 17)
+        title.font = Fonts.ui(.sansMedium, TypeScale.size(17))
         title.textColor = Palette.text
-        meta.font = Fonts.ui(.sans, 14)
+        meta.font = Fonts.ui(.sans, TypeScale.size(14))
         meta.textColor = Palette.secondary
-        time.font = Fonts.ui(.sans, 14)
+        time.font = Fonts.ui(.sans, TypeScale.size(14))
         time.textColor = Palette.secondary
         time.textAlignment = .right
         harness.contentMode = .scaleAspectFit
@@ -93,7 +93,9 @@ final class SessionCell: UICollectionViewListCell {
         self.vm = vm
         dot.backgroundColor = Palette.projectDots[vm.colorIndex % Palette.projectDots.count]
         title.text = vm.title
-        title.font = Fonts.ui(vm.unseen ? .sansSemibold : .sansMedium, 17)
+        title.font = Fonts.ui(vm.unseen ? .sansSemibold : .sansMedium, TypeScale.size(17))
+        meta.font = Fonts.ui(.sans, TypeScale.size(14))
+        time.font = Fonts.ui(.sans, TypeScale.size(14))
         title.textColor = vm.unseen || vm.status != .idle ? Palette.text : Palette.text.withAlphaComponent(0.86)
         var parts = [vm.projectName]
         if let n = vm.prNumber { parts.append(String(n)) } else if let b = vm.branch, !b.isEmpty { parts.append(b) }
@@ -133,39 +135,40 @@ final class SessionCell: UICollectionViewListCell {
         let b = contentView.bounds
         let left: CGFloat = 20 + indent
         let right: CGFloat = 20
-        dot.frame = CGRect(x: left, y: 17, width: 9, height: 9)
+        let k = TypeScale.factor
+        dot.frame = CGRect(x: left, y: (17 * k).rounded(), width: 9, height: 9)
         let textX = left + 9 + 16
         let trailing: CGFloat
         if !status.isHidden {
-            status.frame = CGRect(x: b.width - right - 16, y: 13, width: 16, height: 16)
+            status.frame = CGRect(x: b.width - right - 16, y: (13 * k).rounded(), width: 16, height: 16)
             trailing = status.frame.minX - 10
         } else {
-            let tw = ceil(time.sizeThatFits(CGSize(width: 80, height: 20)).width)
-            time.frame = CGRect(x: b.width - right - tw, y: 11, width: tw, height: 20)
+            let tw = ceil(time.sizeThatFits(CGSize(width: 120, height: 40)).width)
+            time.frame = CGRect(x: b.width - right - tw, y: (11 * k).rounded(), width: tw, height: (20 * k).rounded())
             trailing = time.frame.minX - 10
         }
-        title.frame = CGRect(x: textX, y: 9, width: max(0, trailing - textX), height: 23)
+        title.frame = CGRect(x: textX, y: (9 * k).rounded(), width: max(0, trailing - textX), height: (23 * k).rounded())
         var x = textX
         if harness.image != nil {
             harness.isHidden = false
-            harness.frame = CGRect(x: x, y: 38, width: 15, height: 15)
+            harness.frame = CGRect(x: x, y: (38 * k).rounded(), width: 15, height: 15)
             x += 21
         } else {
             harness.isHidden = true
         }
         if !pin.isHidden {
-            pin.frame = CGRect(x: x, y: 39, width: 11, height: 13)
+            pin.frame = CGRect(x: x, y: (39 * k).rounded(), width: 11, height: 13)
             x += 16
         }
-        let metaW = min(ceil(meta.sizeThatFits(CGSize(width: b.width, height: 18)).width), b.width - right - x - 22)
-        meta.frame = CGRect(x: x, y: 36, width: max(0, metaW), height: 19)
-        prIcon.frame = CGRect(x: meta.frame.maxX + 6, y: 38, width: 14, height: 15)
+        let metaW = min(ceil(meta.sizeThatFits(CGSize(width: b.width, height: 40)).width), b.width - right - x - 22)
+        meta.frame = CGRect(x: x, y: (36 * k).rounded(), width: max(0, metaW), height: (19 * k).rounded())
+        prIcon.frame = CGRect(x: meta.frame.maxX + 6, y: (38 * k).rounded(), width: 14, height: 15)
     }
 }
 
 /// Folder row: icon, name, count, chevron.
 final class FolderCell: UICollectionViewListCell {
-    static let height: CGFloat = 46
+    static var height: CGFloat { (46 * TypeScale.factor).rounded() }
 
     override func preferredLayoutAttributesFitting(_ attrs: UICollectionViewLayoutAttributes) -> UICollectionViewLayoutAttributes {
         attrs.size.height = Self.height
@@ -177,8 +180,8 @@ final class FolderCell: UICollectionViewListCell {
         c.image = UIImage(systemName: vm.symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: 16, weight: .regular))
         c.imageProperties.tintColor = Palette.secondary
         c.imageToTextPadding = 18
-        let text = NSMutableAttributedString(string: vm.name, attributes: [.font: Fonts.ui(.sansMedium, 17), .foregroundColor: Palette.secondary])
-        text.append(NSAttributedString(string: "  \(vm.count)", attributes: [.font: Fonts.ui(.sans, 17), .foregroundColor: Palette.tertiary]))
+        let text = NSMutableAttributedString(string: vm.name, attributes: [.font: Fonts.ui(.sansMedium, TypeScale.size(17)), .foregroundColor: Palette.secondary])
+        text.append(NSAttributedString(string: "  \(vm.count)", attributes: [.font: Fonts.ui(.sans, TypeScale.size(17)), .foregroundColor: Palette.tertiary]))
         c.attributedText = text
         c.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20)
         contentConfiguration = c

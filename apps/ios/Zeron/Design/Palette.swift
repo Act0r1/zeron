@@ -77,3 +77,13 @@ extension UIColor {
         )
     }
 }
+
+/// Dynamic Type for fixed-height UI: one factor per content size category
+/// (rows stay fixed-height, so lists still skip self-sizing).
+enum TypeScale {
+    static var factor: CGFloat {
+        min(1.6, max(0.85, UIFontMetrics(forTextStyle: .body).scaledValue(for: 17) / 17))
+    }
+
+    static func size(_ base: CGFloat) -> CGFloat { (base * factor).rounded(.toNearestOrAwayFromZero) }
+}
