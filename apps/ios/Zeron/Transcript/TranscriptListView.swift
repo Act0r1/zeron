@@ -50,6 +50,13 @@ final class TranscriptListView: UIScrollView, RowViewDelegate {
         addGestureRecognizer(tap)
         addInteraction(UIContextMenuInteraction(delegate: self))
         panGestureRecognizer.addTarget(self, action: #selector(panned(_:)))
+        // Display models are a pure cache (rebuilt from the frame on demand).
+        NotificationCenter.default.addObserver(forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.cache.removeAll()
+            self?.cacheOrder.removeAll()
+            self?.pool.forEach { $0.removeFromSuperview() }
+            self?.pool.removeAll()
+        }
     }
 
     required init?(coder: NSCoder) { fatalError() }
