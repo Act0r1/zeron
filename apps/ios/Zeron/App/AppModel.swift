@@ -103,7 +103,9 @@ final class AppModel {
         )
         do {
             client = try CoreClient(config: config, credentials: credentials, listener: bridge)
-            if !credentials.isDemo { Credentials.store(credentials) }
+            // Only real accounts persist; dev bearers come from launch args
+            // (and would be rejected by the production edge next launch).
+            if case .workOs = credentials { Credentials.store(credentials) }
             refreshWorkspace()
             client?.preloadSessions()
             clock?.invalidate()
