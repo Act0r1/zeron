@@ -2709,6 +2709,12 @@ public protocol SessionHandleProtocol: AnyObject, Sendable {
     func composer()  -> ComposerState
     
     /**
+     * A row's primary action: steer text into the live turn (never
+     * interrupts); attachments send now.
+     */
+    func deliverQueuedNow(id: String) async throws  -> Bool
+    
+    /**
      * Park a message on the shared queue directly. Returns the row id.
      */
     func enqueue(text: String, attachments: [String], holdForTurnEnd: Bool) throws  -> String
@@ -2866,6 +2872,26 @@ open func composer() -> ComposerState  {
             self.uniffiCloneHandle(),uniffiCallStatus
     )
 })
+}
+    
+    /**
+     * A row's primary action: steer text into the live turn (never
+     * interrupts); attachments send now.
+     */
+open func deliverQueuedNow(id: String)async throws  -> Bool  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_zeron_mobile_fn_method_sessionhandle_deliver_queued_now(
+                        self.uniffiCloneHandle(),FfiConverterString.lower(id)
+                )
+            },
+            pollFunc: ffi_zeron_mobile_rust_future_poll_i8,
+            completeFunc: ffi_zeron_mobile_rust_future_complete_i8,
+            freeFunc: ffi_zeron_mobile_rust_future_free_i8,
+            liftFunc: FfiConverterBool.lift,
+            errorHandler: FfiConverterTypeCoreError_lift
+        )
 }
     
     /**
@@ -13147,6 +13173,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_zeron_mobile_checksum_method_sessionhandle_composer() != 12678) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_zeron_mobile_checksum_method_sessionhandle_deliver_queued_now() != 65003) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_zeron_mobile_checksum_method_sessionhandle_enqueue() != 37832) {
