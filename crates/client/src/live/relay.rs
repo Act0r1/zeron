@@ -33,6 +33,9 @@ pub(crate) fn deadline(method: &str) -> Duration {
     match method {
         methods::CREATE_WORKTREE => Duration::from_secs(120),
         methods::LIST_MODELS => Duration::from_secs(100),
+        // A forced list probes every saved login's usage (8s per provider
+        // call, concurrently).
+        methods::LIST_AGENT_ACCOUNTS => Duration::from_secs(45),
         methods::UPLOAD_COMMIT => Duration::from_secs(150),
         _ => CALL_TIMEOUT,
     }

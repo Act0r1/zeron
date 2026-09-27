@@ -9,6 +9,7 @@
 //! id), streaming replies through `SegmentWriter`, flipping session status
 //! rows, draining the queue, and answering relay RPCs.
 
+mod accounts;
 mod fixtures;
 mod png;
 mod transcripts;
@@ -111,6 +112,8 @@ pub(crate) struct DemoHost {
     client: Weak<ClientInner>,
     server: Mutex<DemoServer>,
     refs: Mutex<HashMap<String, Vec<RepoRef>>>,
+    /// Provider accounts per host device (seeded on first ask).
+    agent_accounts: Mutex<HashMap<String, zeron_proto::AgentAccountsSnapshot>>,
     /// Running turn per chat: (turn id, cancel token).
     turns: Mutex<HashMap<String, (u64, CancellationToken)>>,
     turn_seq: AtomicU64,
@@ -134,6 +137,7 @@ impl DemoHost {
             client: Arc::downgrade(client),
             server: Mutex::new(DemoServer::default()),
             refs: Mutex::new(HashMap::new()),
+            agent_accounts: Mutex::new(HashMap::new()),
             turns: Mutex::new(HashMap::new()),
             turn_seq: AtomicU64::new(1),
             turn_gates: Mutex::new(HashMap::new()),
@@ -240,6 +244,39 @@ impl DemoHost {
             .chat(chat_id)
             .map(|c| c.device_id)
             .unwrap_or_else(|| fixtures::MAC.to_owned())
+    }
+
+    /// `ListAgentAccounts` / `ActivateAgentAccount` / `ForgetAgentAccount`
+    /// against the demo host's in-memory accounts.
+    pub(crate) async fn agent_accounts(
+        &self,
+        device_id: &str,
+        method: &str,
+        account_id: Option<&str>,
+    ) -> Result<zeron_proto::AgentAccountsSnapshot> {
+        use zeron_rpc::methods as m;
+        let client = self.client()?;
+        if !client.network_online() || !self.host_online(&client, device_id) {
+            return Err(ClientError::HostUnavailable(device_id.to_owned()));
+        }
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        let mut all = lock(&self.agent_accounts);
+        let snapshot = all
+            .entry(device_id.to_owned())
+            .or_insert_with(|| accounts::seed(device_id));
+        let id = account_id.unwrap_or_default();
+        let changed = match method {
+            m::LIST_AGENT_ACCOUNTS => true,
+            m::ACTIVATE_AGENT_ACCOUNT => accounts::activate(snapshot, id),
+            m::FORGET_AGENT_ACCOUNT => accounts::forget(snapshot, id),
+            other => return Err(ClientError::Unsupported(other.to_owned())),
+        };
+        if !changed {
+            return Err(ClientError::HostError(format!(
+                "{method}: no switchable account {id}"
+            )));
+        }
+        Ok(snapshot.clone())
     }
 
     fn host_online(&self, client: &ClientInner, device_id: &str) -> bool {

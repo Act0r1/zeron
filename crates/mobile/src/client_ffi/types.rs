@@ -1076,3 +1076,122 @@ pub struct FileMatch {
 pub fn file_mention_link(path: String, is_dir: bool) -> String {
     zeron_proto::file_mentions::local_file_link(&path, is_dir)
 }
+
+// ── provider (agent CLI) accounts ─────────────────────────────────────────
+
+/// One plan rate-limit window ("Session", "Week", "Month", …).
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct AgentUsageWindow {
+    pub label: String,
+    /// 0.0..=1.0 of the window used.
+    pub used_fraction: f32,
+    /// Epoch millis the window resets, if the provider says.
+    pub resets_at_ms: Option<i64>,
+}
+
+/// A login saved for an agent CLI on one host device.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct AgentAccount {
+    pub id: String,
+    /// Wire harness id (`claude-code`, `codex`, …).
+    pub harness: String,
+    pub email: Option<String>,
+    pub plan_label: Option<String>,
+    /// The login the CLI uses now (new sessions run on it).
+    pub active: bool,
+    pub usage_windows: Vec<AgentUsageWindow>,
+    /// Epoch millis of the usage probe the windows came from.
+    pub usage_fetched_at_ms: Option<i64>,
+    /// Why usage is missing or stale ("Rate limited — retrying in 2m").
+    pub usage_error: Option<String>,
+    pub display_name: Option<String>,
+    pub organization: Option<String>,
+    /// Signed in with a raw API key (no plan usage).
+    pub api_key: bool,
+    /// Can be made the one in use (false: credentials unreadable, or the
+    /// agent manages its own pool).
+    pub switchable: bool,
+    /// Upstream login group inside multi-provider agents (OpenCode's
+    /// `openai`, …); rows sharing it are one single-choice group.
+    pub provider: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct AgentAccountWarning {
+    pub harness: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct AgentAccountsSnapshot {
+    pub accounts: Vec<AgentAccount>,
+    pub warnings: Vec<AgentAccountWarning>,
+}
+
+fn harness_wire(h: &zeron_proto::HarnessId) -> String {
+    serde_json::to_value(h)
+        .ok()
+        .and_then(|v| v.as_str().map(str::to_owned))
+        .unwrap_or_default()
+}
+
+impl From<zeron_proto::AgentAccountsSnapshot> for AgentAccountsSnapshot {
+    fn from(s: zeron_proto::AgentAccountsSnapshot) -> Self {
+        Self {
+            accounts: s
+                .accounts
+                .into_iter()
+                .map(|a| AgentAccount {
+                    harness: harness_wire(&a.harness),
+                    id: a.id,
+                    email: a.email,
+                    plan_label: a.plan_label,
+                    active: a.active,
+                    usage_windows: a
+                        .usage_windows
+                        .into_iter()
+                        .map(|w| AgentUsageWindow {
+                            label: w.label,
+                            used_fraction: w.used_fraction.clamp(0.0, 1.0),
+                            resets_at_ms: w.resets_at.map(|t| t.timestamp_millis()),
+                        })
+                        .collect(),
+                    usage_fetched_at_ms: a.usage_fetched_at,
+                    usage_error: a.usage_error,
+                    display_name: a.display_name,
+                    organization: a.organization,
+                    api_key: a.auth_kind == Some(zeron_proto::AgentAuthKind::ApiKey),
+                    switchable: a.switchable,
+                    provider: a.provider,
+                })
+                .collect(),
+            warnings: s
+                .warnings
+                .into_iter()
+                .map(|w| AgentAccountWarning {
+                    harness: harness_wire(&w.harness),
+                    message: w.message,
+                })
+                .collect(),
+        }
+    }
+}
+
+/// How full a usage window reads (desktop thresholds: amber at 80%, red at 95%).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum UsageLevel {
+    Normal,
+    Warning,
+    Critical,
+}
+
+#[uniffi::export]
+pub fn usage_level(used_fraction: f32) -> UsageLevel {
+    if used_fraction >= 0.95 {
+        UsageLevel::Critical
+    } else if used_fraction >= 0.8 {
+        UsageLevel::Warning
+    } else {
+        UsageLevel::Normal
+    }
+}

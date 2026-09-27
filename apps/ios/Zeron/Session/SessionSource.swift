@@ -55,6 +55,8 @@ struct SessionChrome: Equatable {
 protocol SessionSource: AnyObject {
     var chrome: SessionChrome { get }
     var onChange: (() -> Void)? { get set }
+    /// Open Accounts & Usage for this session's agent (from the usage chip).
+    var onShowAccounts: (() -> Void)? { get set }
     /// Bind the Rust layout engine to this session's transcript.
     func attach(_ engine: TranscriptView)
     func detach()
@@ -91,6 +93,7 @@ enum QueueAction {
 final class FixtureSessionSource: SessionSource {
     private(set) var chrome = SessionChrome()
     var onChange: (() -> Void)?
+    var onShowAccounts: (() -> Void)?
     private weak var engine: TranscriptView?
     private var entries: [DebugEntry] = []
     private var timer: Timer?

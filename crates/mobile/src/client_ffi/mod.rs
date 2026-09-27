@@ -356,6 +356,53 @@ impl CoreClient {
             .collect()
     }
 
+    /// Provider accounts on `device_id`: logins per agent CLI, the one in
+    /// use, plan usage. `force_usage` re-probes usage on the host.
+    pub async fn list_agent_accounts(
+        &self,
+        device_id: String,
+        force_usage: bool,
+    ) -> CoreResult<AgentAccountsSnapshot> {
+        let client = self.client.clone();
+        on_runtime(async move { client.list_agent_accounts(&device_id, force_usage).await })
+            .await
+            .map(Into::into)
+    }
+
+    /// Switch `harness` on `device_id` to `account_id` (affects new sessions).
+    pub async fn activate_agent_account(
+        &self,
+        device_id: String,
+        harness: String,
+        account_id: String,
+    ) -> CoreResult<AgentAccountsSnapshot> {
+        let client = self.client.clone();
+        on_runtime(async move {
+            client
+                .activate_agent_account(&device_id, &harness, &account_id)
+                .await
+        })
+        .await
+        .map(Into::into)
+    }
+
+    /// Remove a saved login from `device_id`.
+    pub async fn forget_agent_account(
+        &self,
+        device_id: String,
+        harness: String,
+        account_id: String,
+    ) -> CoreResult<AgentAccountsSnapshot> {
+        let client = self.client.clone();
+        on_runtime(async move {
+            client
+                .forget_agent_account(&device_id, &harness, &account_id)
+                .await
+        })
+        .await
+        .map(Into::into)
+    }
+
     pub async fn list_refs(
         &self,
         device_id: String,
@@ -377,7 +424,12 @@ impl CoreClient {
         query: String,
     ) -> CoreResult<Vec<FileMatch>> {
         let client = self.client.clone();
-        let files = on_runtime(async move { client.search_files(&device_id, chat_id, space_id, &query).await }).await?;
+        let files = on_runtime(async move {
+            client
+                .search_files(&device_id, chat_id, space_id, &query)
+                .await
+        })
+        .await?;
         Ok(files
             .into_iter()
             .map(|f| FileMatch {

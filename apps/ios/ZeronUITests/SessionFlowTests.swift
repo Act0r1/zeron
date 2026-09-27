@@ -466,18 +466,15 @@ final class SessionFlowTests: XCTestCase {
         try XCTSkipUnless(FileManager.default.fileExists(atPath: path), "needs a host image at \(path)")
         let app = launch(["-wallpaper", path, "-wallpaper-effect", "halftone", "-route", "more"])
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 10))
-        let effect = app.staticTexts["Effect"]
-        for _ in 0..<4 where !effect.isHittable { app.swipeUp() }
-        XCTAssertTrue(effect.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Halftone'")).firstMatch.exists)
+        let row = app.cells["settings-wallpaper"]
+        for _ in 0..<4 where !row.isHittable { app.swipeUp() }
+        XCTAssertTrue(row.label.contains("Halftone"), "effect shown on the row: \(row.label)")
+        // One row; its menu holds the choices.
+        row.tap()
+        XCTAssertTrue(app.buttons["Effect"].waitForExistence(timeout: 5))
         snapshot(app, "wallpaper-settings")
-        // Scroll the row clear of the bottom accessory / tab bar before tapping.
-        let remove = app.staticTexts["Remove Wallpaper"]
-        let limit = app.windows.firstMatch.frame.height * 0.7
-        for _ in 0..<4 where remove.frame.maxY > limit { app.swipeUp() }
-        remove.tap()
-        XCTAssertTrue(app.staticTexts["Choose Wallpaper…"].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.staticTexts["Effect"].exists)
+        app.buttons["Remove Wallpaper"].tap()
+        XCTAssertTrue(app.cells.matching(NSPredicate(format: "identifier == 'settings-wallpaper' AND label CONTAINS 'Behind new chats'")).firstMatch.waitForExistence(timeout: 5))
     }
 
     /// The new-session headline stays above the composer, keyboard up.

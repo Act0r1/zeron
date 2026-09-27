@@ -81,6 +81,7 @@ final class SessionViewController: UIViewController, UIGestureRecognizerDelegate
             return .sent
         }
         composer.onStop = { [weak self] in self?.source.stop() }
+        source.onShowAccounts = { [weak self] in self?.showAccounts() }
         composer.text = Drafts.load(chatId)
         composer.mentionSearch = { [weak self] q in await self?.source.searchFiles(q) ?? [] }
         composer.onHeightChange = { [weak self] in self?.view.setNeedsLayout() }
@@ -434,6 +435,21 @@ final class SessionViewController: UIViewController, UIGestureRecognizerDelegate
         }
     }
 
+    /// The provider accounts on this session's computer, opened at its agent.
+    private func showAccounts() {
+        let row = app.row(chatId)
+        let vc = ProviderAccountsViewController(app: app, deviceId: row?.deviceId, focusHarness: row?.harness)
+        let nav = MainTabController.nav(vc)
+        vc.navigationItem.leftBarButtonItem = UIBarButtonItem(systemItem: .done, primaryAction: UIAction { [weak nav] _ in
+            nav?.dismiss(animated: true)
+        })
+        if let sheet = nav.sheetPresentationController {
+            sheet.detents = [.medium(), .large()]
+            sheet.prefersGrabberVisible = true
+        }
+        present(nav, animated: true)
+    }
+
     private func sessionMenu() -> UIMenu {
         UIMenu(children: [UIDeferredMenuElement.uncached { [weak self] done in
             guard let self else { return done([]) }
@@ -443,6 +459,9 @@ final class SessionViewController: UIViewController, UIGestureRecognizerDelegate
                 UIAction(title: pinned ? "Unpin" : "Pin", image: UIImage(systemName: pinned ? "pin.slash" : "pin")) { _ in self.app.setPinned(self.chatId, !pinned) },
                 UIAction(title: "Copy Transcript", image: UIImage(systemName: "doc.on.doc")) { _ in
                     UIPasteboard.general.string = self.engine.frame().plainText()
+                },
+                UIAction(title: "Account & Usage", image: UIImage(systemName: "gauge.with.dots.needle.33percent")) { _ in
+                    self.showAccounts()
                 },
                 UIAction(title: "Archive", image: UIImage(systemName: "archivebox"), attributes: .destructive) { _ in
                     self.app.archive(self.chatId)

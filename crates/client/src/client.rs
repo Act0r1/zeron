@@ -1167,6 +1167,75 @@ impl Client {
         }
     }
 
+    // ── provider (agent CLI) accounts ─────────────────────────────────────
+
+    /// Who's signed in to each agent CLI on `device_id`, which login is in
+    /// use, and plan usage windows. The host answers from its last usage
+    /// probe; `force_usage` re-probes (throttled host-side per account).
+    pub async fn list_agent_accounts(
+        &self,
+        device_id: &str,
+        force_usage: bool,
+    ) -> Result<zeron_proto::AgentAccountsSnapshot> {
+        self.agent_accounts_call(
+            device_id,
+            zeron_rpc::methods::LIST_AGENT_ACCOUNTS,
+            serde_json::json!({ "forceUsage": force_usage }),
+            None,
+        )
+        .await
+    }
+
+    /// Make `account_id` the login `harness` uses on `device_id` (new
+    /// sessions pick it up). Replies with the updated accounts.
+    pub async fn activate_agent_account(
+        &self,
+        device_id: &str,
+        harness: &str,
+        account_id: &str,
+    ) -> Result<zeron_proto::AgentAccountsSnapshot> {
+        self.agent_accounts_call(
+            device_id,
+            zeron_rpc::methods::ACTIVATE_AGENT_ACCOUNT,
+            serde_json::json!({ "harness": harness, "accountId": account_id }),
+            Some(account_id),
+        )
+        .await
+    }
+
+    /// Remove a saved login from `device_id` (signs the CLI out when it was
+    /// the one in use). Replies with the updated accounts.
+    pub async fn forget_agent_account(
+        &self,
+        device_id: &str,
+        harness: &str,
+        account_id: &str,
+    ) -> Result<zeron_proto::AgentAccountsSnapshot> {
+        self.agent_accounts_call(
+            device_id,
+            zeron_rpc::methods::FORGET_AGENT_ACCOUNT,
+            serde_json::json!({ "harness": harness, "accountId": account_id }),
+            Some(account_id),
+        )
+        .await
+    }
+
+    async fn agent_accounts_call(
+        &self,
+        device_id: &str,
+        method: &'static str,
+        params: serde_json::Value,
+        account_id: Option<&str>,
+    ) -> Result<zeron_proto::AgentAccountsSnapshot> {
+        match self.inner.backend() {
+            Backend::Demo(demo) => demo.agent_accounts(device_id, method, account_id).await,
+            Backend::Live(live) => {
+                let value = live.relay.call(device_id, method, params).await?;
+                serde_json::from_value(value).map_err(|e| ClientError::HostError(e.to_string()))
+            }
+        }
+    }
+
     pub async fn list_refs(&self, device_id: &str, repo_path: &str) -> Result<Vec<RepoRef>> {
         match self.inner.backend() {
             Backend::Demo(demo) => demo.list_refs(repo_path).await,

@@ -220,6 +220,8 @@ final class AppModel {
         rows = [:]
         rawProjects = []
         lastHosts = []
+        providerAccounts = [:]
+        providerAccountsAt = [:]
         connectivity = nil
         live = LiveCounts()
         workspaceRevision = 0
@@ -481,6 +483,54 @@ final class AppModel {
 
     var hostOptions: [HostOption] {
         (client?.executionDevices() ?? []).map { HostOption(id: $0.id, name: $0.name, online: $0.online) }
+    }
+
+    /// Computers that run sessions, with their details (Settings).
+    var executionDevices: [DeviceView] { client?.executionDevices() ?? [] }
+
+    // MARK: Provider accounts
+
+    /// Last accounts snapshot per host device, so screens paint at once and
+    /// refresh behind it.
+    private(set) var providerAccounts: [String: AgentAccountsSnapshot] = [:]
+    private(set) var providerAccountsAt: [String: Date] = [:]
+
+    /// The computer whose accounts Settings summarizes: the one new
+    /// sessions start on (the draft's project or host) when it's online,
+    /// else the online computer with the most sessions.
+    var primaryHostId: String? {
+        let devices = executionDevices
+        let online = devices.filter(\.online)
+        let project = (lastDraft.projectId ?? projectOptions.first?.id).flatMap { id in projectOptions.first { $0.id == id }?.device }
+        if let preferred = project ?? lastDraft.hostId, online.contains(where: { $0.id == preferred }) { return preferred }
+        return online.max { $0.sessionCount < $1.sessionCount }?.id ?? devices.first?.id
+    }
+
+    /// Accounts on `deviceId` (`force`: re-probe plan usage on the host).
+    @MainActor
+    func loadProviderAccounts(on deviceId: String, force: Bool) async throws -> AgentAccountsSnapshot {
+        guard let client else { throw CoreError.Auth(message: "Signed out") }
+        return store(try await client.listAgentAccounts(deviceId: deviceId, forceUsage: force), for: deviceId)
+    }
+
+    @MainActor
+    func activateProviderAccount(_ account: AgentAccount, on deviceId: String) async throws -> AgentAccountsSnapshot {
+        guard let client else { throw CoreError.Auth(message: "Signed out") }
+        return store(try await client.activateAgentAccount(deviceId: deviceId, harness: account.harness, accountId: account.id), for: deviceId)
+    }
+
+    @MainActor
+    func forgetProviderAccount(_ account: AgentAccount, on deviceId: String) async throws -> AgentAccountsSnapshot {
+        guard let client else { throw CoreError.Auth(message: "Signed out") }
+        return store(try await client.forgetAgentAccount(deviceId: deviceId, harness: account.harness, accountId: account.id), for: deviceId)
+    }
+
+    @MainActor
+    private func store(_ snapshot: AgentAccountsSnapshot, for deviceId: String) -> AgentAccountsSnapshot {
+        providerAccounts[deviceId] = snapshot
+        providerAccountsAt[deviceId] = Date()
+        observers.values.forEach { $0() }
+        return snapshot
     }
 
     /// A device's name; never its id.

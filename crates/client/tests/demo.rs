@@ -249,8 +249,7 @@ fn questions_answer_through_respond_input() {
     });
     // The host publishes the question, then flips the chat's status.
     wait_for("awaiting input", Duration::from_secs(5), || {
-        client.workspace().session("chat-deploy").unwrap().indicator
-            == ChatIndicator::AwaitingInput
+        client.workspace().session("chat-deploy").unwrap().indicator == ChatIndicator::AwaitingInput
     });
     let input = session.composer().open_input.clone().unwrap();
     session
@@ -513,4 +512,47 @@ fn sends_to_an_offline_host_park_as_queued_not_working() {
     let row = client.workspace().session("chat-blog").unwrap().clone();
     assert_eq!(row.send_state, Some(zeron_client::SendState::Queued));
     assert_eq!(row.host_indicator, ChatIndicator::Idle);
+}
+
+#[test]
+fn provider_accounts_list_switch_and_remove() {
+    let (client, _dir) = demo(fast());
+    let rt = zeron_client::runtime::shared();
+    let host = "dev-mac";
+    let listed = rt.block_on(client.list_agent_accounts(host, true)).unwrap();
+    let claude: Vec<_> = listed
+        .accounts
+        .iter()
+        .filter(|a| serde_json::to_value(&a.harness).unwrap() == "claude-code")
+        .collect();
+    assert_eq!(claude.len(), 2);
+    assert!(claude[0].active && !claude[1].active);
+    assert_eq!(claude[0].usage_windows[0].label, "Session");
+
+    let second = claude[1].id.clone();
+    let switched = rt
+        .block_on(client.activate_agent_account(host, "claude-code", &second))
+        .unwrap();
+    let active: Vec<_> = switched
+        .accounts
+        .iter()
+        .filter(|a| a.active)
+        .map(|a| a.id.as_str())
+        .collect();
+    assert!(active.contains(&second.as_str()));
+    assert!(
+        !active.contains(&claude[0].id.as_str()),
+        "one login in use per harness"
+    );
+
+    let removed = rt
+        .block_on(client.forget_agent_account(host, "claude-code", &second))
+        .unwrap();
+    assert!(!removed.accounts.iter().any(|a| a.id == second));
+
+    // An offline host can't be asked.
+    assert!(
+        rt.block_on(client.list_agent_accounts("dev-studio", false))
+            .is_err()
+    );
 }

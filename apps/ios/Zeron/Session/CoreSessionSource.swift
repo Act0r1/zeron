@@ -5,6 +5,7 @@ import UIKit
 final class CoreSessionSource: SessionSource {
     private(set) var chrome = SessionChrome()
     var onChange: (() -> Void)?
+    var onShowAccounts: (() -> Void)?
     private weak var app: AppModel?
     private let client: CoreClient
     private let handle: SessionHandle
@@ -21,6 +22,33 @@ final class CoreSessionSource: SessionSource {
         token = app.observeSession(chatId) { [weak self] in self?.refresh() }
         appToken = app.observe { [weak self] in self?.refresh() }
         refresh()
+        refreshUsage(force: false)
+    }
+
+    // MARK: Plan usage (the near-limit chip)
+
+    private var usageForcedAt: Date?
+
+    /// The host's accounts for the usage chip: its last probe when ours is
+    /// old; a fresh probe after turns (usage moves with them), at most every
+    /// couple of minutes.
+    private func refreshUsage(force: Bool) {
+        guard let app, !hostDevice.isEmpty else { return }
+        let host = hostDevice
+        if force {
+            if let at = usageForcedAt, Date().timeIntervalSince(at) < 120 { return }
+            usageForcedAt = Date()
+        } else if let at = app.providerAccountsAt[host], Date().timeIntervalSince(at) < 300 {
+            return
+        }
+        Task { @MainActor [weak app] in _ = try? await app?.loadProviderAccounts(on: host, force: force) }
+    }
+
+    /// The session agent's login in use on its host, when the host said.
+    private var activeAccount: (account: AgentAccount, others: [AgentAccount])? {
+        guard let app, let harness = app.row(chatId)?.harness, let snapshot = app.providerAccounts[hostDevice],
+              let active = snapshot.accounts.first(where: { $0.harness == harness && $0.active }) else { return nil }
+        return (active, snapshot.accounts.filter { $0.harness == harness && $0.provider == active.provider && !$0.active })
     }
 
     func attach(_ engine: TranscriptView) {
@@ -71,7 +99,16 @@ final class CoreSessionSource: SessionSource {
                 ))
             }
         }
+        // Close to a plan limit: say so first, where the next message is
+        // written (the row scrolls; a warning at its end would fade out).
+        if let top = activeAccount.flatMap({ ProviderUsage.topWindow($0.account) }), usageLevel(usedFraction: top.usedFraction) != .normal {
+            let critical = usageLevel(usedFraction: top.usedFraction) == .critical
+            chips.insert(ComposerChip(id: "usage", title: "\(top.label) \(ProviderUsage.percent(top.usedFraction))",
+                                      symbol: critical ? "exclamationmark.circle" : "gauge.with.dots.needle.67percent",
+                                      tint: ProviderUsage.color(top.usedFraction)), at: 0)
+        }
         next.chips = chips
+        if next.running != chrome.running, chrome.running { refreshUsage(force: true) }
         if let sendFailure {
             next.banner = .failed(sendFailure)
         } else if c.sendState == .failed {
@@ -222,6 +259,35 @@ final class CoreSessionSource: SessionSource {
                     })
                 }
             }])
+        case "usage":
+            guard let (active, others) = activeAccount else { return nil }
+            let host = hostDevice
+            let windows = active.usageWindows.map { w in
+                UIAction(title: "\(w.label) \(ProviderUsage.percent(w.usedFraction))", subtitle: ProviderUsage.resetText(w.resetsAtMs),
+                         image: UIImage(systemName: "gauge.with.dots.needle.67percent"), attributes: .disabled) { _ in }
+            }
+            let switches = others.filter(\.switchable).map { a in
+                UIAction(title: "Switch to \(ProviderUsage.title(a))",
+                         subtitle: ProviderUsage.topWindow(a).map { "\($0.label) \(ProviderUsage.percent($0.usedFraction))" } ?? a.planLabel,
+                         image: UIImage(systemName: "arrow.left.arrow.right")) { [weak self] _ in
+                    guard let app = self?.app else { return }
+                    Task { @MainActor in
+                        let window = UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.keyWindow }.first
+                        do {
+                            _ = try await app.activateProviderAccount(a, on: host)
+                            Toast.show("\(HarnessNames.label(a.harness)) now uses \(ProviderUsage.title(a)) for new sessions", in: window)
+                        } catch {
+                            Toast.show("Couldn't switch accounts", in: window)
+                        }
+                    }
+                }
+            }
+            let open = UIAction(title: "Accounts & Usage…", image: UIImage(systemName: "person.2")) { [weak self] _ in self?.onShowAccounts?() }
+            return UIMenu(title: "\(HarnessNames.label(active.harness)) · \(ProviderUsage.title(active))", children: [
+                UIMenu(options: .displayInline, children: windows),
+                UIMenu(options: .displayInline, children: switches),
+                open,
+            ])
         case "pr":
             guard let url = row.pullRequest.flatMap({ URL(string: $0.url) }) else { return nil }
             return UIMenu(title: row.pullRequest?.title ?? "", children: [
