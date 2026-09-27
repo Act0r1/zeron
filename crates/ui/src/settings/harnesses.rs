@@ -274,9 +274,8 @@ impl HarnessesPage {
         }
     }
 
-    /// The expanded provider's Updates section: the update policy (short
-    /// labels in the menu, the chosen one explained under the title) and,
-    /// while a new version is offered, "Ignore version" on the label line.
+    /// The expanded provider's Updates section: the update policy, short
+    /// labels in the menu and the chosen one explained under the title.
     fn render_updates_for(
         &self,
         harness: HarnessId,
@@ -291,8 +290,6 @@ impl HarnessesPage {
             .iter()
             .position(|(policy, ..)| *policy == status.policy)
             .unwrap_or(0);
-        let ignorable =
-            status.phase == HarnessUpdatePhase::Available && status.latest_version.is_some();
         let closed = widgets::SelectState::default();
         let policy_select = widgets::select(
             format!("harness-update-policy-{harness:?}"),
@@ -314,24 +311,6 @@ impl HarnessesPage {
             }
         })
         .render(self.policy_selects.get(&harness).unwrap_or(&closed), cx);
-        let label = div()
-            .flex()
-            .flex_row()
-            .items_center()
-            .child(widgets::details_label(theme, "Updates"))
-            .child(div().flex_1())
-            .when(ignorable, |label| {
-                label.child(
-                    widgets::ghost_action(theme)
-                        .id(format!("harness-update-ignore-{harness:?}"))
-                        // Optically align the label with the select's edge.
-                        .mr(px(-10.0))
-                        .on_click(cx.listener(move |page, _, _, cx| {
-                            page.dismiss_harness_update(harness, cx)
-                        }))
-                        .child("Ignore version"),
-                )
-            });
         let row = div()
             .min_h(px(52.0))
             .py(px(10.0))
@@ -354,7 +333,7 @@ impl HarnessesPage {
             div()
                 .flex()
                 .flex_col()
-                .child(label)
+                .child(widgets::details_label(theme, "Updates"))
                 .child(row)
                 .into_any_element(),
         )
@@ -679,29 +658,6 @@ impl HarnessesPage {
         }));
     }
 
-    fn dismiss_harness_update(&mut self, harness: HarnessId, cx: &mut Context<Self>) {
-        if !self.can_control_updates(cx) {
-            return;
-        }
-        let Some(engine) = self.state.read(cx).engine().cloned() else {
-            return;
-        };
-        let params = self.with_target(serde_json::json!({ "harness": harness }));
-        self.update_action_task = Some(cx.spawn(async move |this, cx| {
-            let result = engine
-                .client()
-                .call(methods::DISMISS_HARNESS_UPDATE, params)
-                .await;
-            this.update(cx, |page, cx| {
-                if let Err(error) = result {
-                    page.error = Some(error.to_string());
-                }
-                cx.notify();
-            })
-            .ok();
-        }));
-    }
-
     fn cancel_harness_update(&mut self, harness: HarnessId, cx: &mut Context<Self>) {
         if !self.can_control_updates(cx) {
             return;
@@ -937,7 +893,7 @@ impl HarnessesPage {
                 let expanded = enabled && self.expanded_harness == Some(harness);
                 // The row's one update action sits inside the trigger, before
                 // the chevron, so it appearing never moves the chevron; the
-                // policy and "Ignore version" live in the expanded details.
+                // update policy lives in the expanded details.
                 let update_action = update.and_then(|status| {
                     let (id, label, primary) = match status.phase {
                         HarnessUpdatePhase::Available
