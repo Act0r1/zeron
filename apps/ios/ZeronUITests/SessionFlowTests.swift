@@ -59,6 +59,30 @@ final class SessionFlowTests: XCTestCase {
         snapshot(app, "reply-complete")
     }
 
+    /// Leaving a session with a long draft and coming back rests the
+    /// composer as a preview of whole lines (ending in "…"), not a scrolled
+    /// box with the next line sliced through the bottom edge.
+    func testLongDraftRestsAsWholeLinePreview() {
+        let app = launch(["-route", "chat:chat-deploy"])
+        let input = app.textViews["composer-input"]
+        XCTAssertTrue(input.waitForExistence(timeout: 10))
+        input.tap()
+        input.typeText("let's fix the new worktree icon it makes no sense, also let's make it so that there's no descriptions the line is too long and wraps onto a fourth line")
+        snapshot(app, "draft-focused")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        let row = app.cells["session-chat-deploy"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.tap()
+        XCTAssertTrue(input.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 3))
+        snapshot(app, "draft-resting")
+        // Two whole lines plus the capsule's insets — never a third.
+        XCTAssertLessThan(input.frame.height, 90)
+        input.tap()
+        XCTAssertGreaterThan(input.frame.height, 90, "focusing restores the full draft")
+        snapshot(app, "draft-reopened")
+    }
+
     func testQuestionPanelAnswersAndResumes() {
         let app = launch(["-route", "chat:chat-deploy"])
         let input = app.textViews["composer-input"]

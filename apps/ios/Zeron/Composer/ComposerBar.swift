@@ -527,13 +527,23 @@ final class ComposerBar: UIView, UITextViewDelegate, UIGestureRecognizerDelegate
     }
 
     private func recomputeTextHeight() {
+        // At rest a draft is a preview: whole lines ending in "…", never a
+        // scrolled view whose next line bleeds into the bottom inset.
+        let preview = !isCard
+        let lines = preview ? maxLines : 0
+        let breakMode: NSLineBreakMode = preview ? .byTruncatingTail : .byWordWrapping
+        if textView.textContainer.maximumNumberOfLines != lines || textView.textContainer.lineBreakMode != breakMode {
+            textView.textContainer.maximumNumberOfLines = lines
+            textView.textContainer.lineBreakMode = breakMode
+        }
         let width = max(40, textView.bounds.width)
         let fitting = textView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude)).height
         let insets = textView.textContainerInset.top + textView.textContainerInset.bottom
         let maxHeight = font.lineHeight * CGFloat(maxLines) + insets
         let minHeight: CGFloat = isCard ? 46 : Self.compactHeight
-        textView.isScrollEnabled = fitting > maxHeight
-        textHeight.constant = min(max(minHeight, fitting), maxHeight)
+        textView.isScrollEnabled = !preview && fitting > maxHeight
+        if preview { textView.contentOffset = .zero }
+        textHeight.constant = preview ? max(minHeight, fitting) : min(max(minHeight, fitting), maxHeight)
     }
 
     private func textChanged() {

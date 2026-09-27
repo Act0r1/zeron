@@ -44,7 +44,7 @@ struct FolderRowVM: Hashable {
 /// and PR badge follow the desktop sidebar.
 ///
 ///   [mark]  Title of the session ··········· ⠿ Working
-///           ● project  branch ··············· ⎇ 412
+///   [tile]  project  branch ················· ⎇ 412
 final class SessionCell: UICollectionViewListCell {
     static var height: CGFloat { (62 * TypeScale.factor).rounded() }
 
@@ -164,9 +164,11 @@ final class SessionCell: UICollectionViewListCell {
             trailing = status.frame.minX - 10
         }
         title.frame = CGRect(x: textX, y: titleY, width: max(0, trailing - textX), height: titleH)
+        // The project tile sits in the harness mark's column (centered under
+        // it), so both lines start their text at the same edge.
         let tile = (14 * k).rounded()
-        projectTile.frame = CGRect(x: textX, y: Self.xHeightCenter(Fonts.ui(.sans, TypeScale.size(13.5)), top: metaY, height: metaH) - tile / 2, width: tile, height: tile)
-        let x = textX + tile + 7
+        projectTile.frame = CGRect(x: harness.frame.midX - tile / 2, y: Self.xHeightCenter(Fonts.ui(.sans, TypeScale.size(13.5)), top: metaY, height: metaH) - tile / 2, width: tile, height: tile)
+        let x = textX
         var metaRight = b.width - right
         if !prBadge.isHidden {
             let size = prBadge.intrinsicContentSize

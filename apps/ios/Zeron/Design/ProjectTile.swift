@@ -81,3 +81,15 @@ enum BranchIcon {
         }.withRenderingMode(.alwaysTemplate)
     }
 }
+
+/// The desktop's worktree glyph (`folder-with-files.svg`, template).
+enum WorktreeIcon {
+    static let image: UIImage? = UIImage(named: "tool-folder-with-files")
+
+    static func sized(_ side: CGFloat = 13) -> UIImage? {
+        guard let image else { return nil }
+        return UIGraphicsImageRenderer(size: CGSize(width: side, height: side)).image { _ in
+            image.draw(in: CGRect(x: 0, y: 0, width: side, height: side))
+        }.withRenderingMode(.alwaysTemplate)
+    }
+}

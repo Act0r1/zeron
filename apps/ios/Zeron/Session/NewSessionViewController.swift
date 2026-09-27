@@ -236,7 +236,7 @@ final class NewSessionViewController: UIViewController, UIGestureRecognizerDeleg
         if let p = project {
             chips.append(ComposerChip(id: "project", title: p.name, symbol: nil, icon: ProjectTile.image(name: p.name, colorIndex: p.colorIndex)))
             if p.git {
-                chips.append(ComposerChip(id: "branch", title: draft.worktree ? "New worktree" : (draft.branch ?? "Current branch"), symbol: draft.worktree ? "square.split.bottomrightquarter" : nil, icon: draft.worktree ? nil : BranchIcon.sized()))
+                chips.append(ComposerChip(id: "branch", title: draft.worktree ? "New worktree" : (draft.branch ?? "Current branch"), symbol: nil, icon: draft.worktree ? WorktreeIcon.sized() : BranchIcon.sized()))
             }
         } else {
             let host = app.hostOptions.first { $0.id == draft.hostId }
@@ -309,7 +309,7 @@ final class NewSessionViewController: UIViewController, UIGestureRecognizerDeleg
 
     private func branchMenu() -> UIMenu {
         UIMenu(title: "Checkout", children: [
-            UIAction(title: "New worktree", subtitle: "Isolated branch for this session", image: UIImage(systemName: "square.split.bottomrightquarter"), state: draft.worktree ? .on : .off) { [weak self] _ in
+            UIAction(title: "New worktree", image: WorktreeIcon.sized(18), state: draft.worktree ? .on : .off) { [weak self] _ in
                 self?.draft.worktree.toggle()
                 self?.refreshChips()
             },
