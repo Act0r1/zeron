@@ -164,13 +164,14 @@ final class SessionCell: UICollectionViewListCell {
         let titleH = (22 * k).rounded()
         let metaY = (35 * k).rounded()
         let metaH = (18 * k).rounded()
-        // The mark centers on the title's capitals (its font metrics, not
-        // the line box) and stays close to cap height in size.
+        // The mark centers on the title's x-height (font metrics, not the
+        // line box): titles are mostly lowercase, and centering on the
+        // capitals left the mark riding high — the project tile's rule too.
         let mark = Self.markSide
         let titleFont = title.font ?? Fonts.ui(.sansMedium, TypeScale.size(16.5))
         let baseline = titleY + (titleH - titleFont.lineHeight) / 2 + titleFont.ascender
-        harness.frame = CGRect(x: left, y: (baseline - titleFont.capHeight / 2 - mark / 2).rounded(), width: mark, height: mark)
-        let textX = left + mark + 12
+        harness.frame = CGRect(x: left, y: (baseline - titleFont.xHeight / 2 - mark / 2).rounded(), width: mark, height: mark)
+        let textX = left + mark + 14
         let tw = ceil(time.sizeThatFits(CGSize(width: 140, height: 40)).width)
         time.frame = CGRect(x: b.width - right - tw, y: titleY, width: tw, height: titleH)
         var trailing = time.frame.minX - 10
@@ -189,8 +190,8 @@ final class SessionCell: UICollectionViewListCell {
         meta.frame = CGRect(x: x, y: metaY, width: max(0, metaRight - x), height: metaH)
     }
 
-    /// Harness mark side: about the title's cap height plus a little air.
-    static var markSide: CGFloat { (16 * TypeScale.factor).rounded() }
+    /// Harness mark side.
+    static let markSide: CGFloat = 20
 }
 
 /// Folder row: icon, name, count, chevron.
