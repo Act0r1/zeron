@@ -419,4 +419,31 @@ final class SessionFlowTests: XCTestCase {
         XCTAssertLessThan(hero.frame.maxY, composer.frame.minY - 8, "headline clear of the composer")
         snapshot(app, "new-session-headline")
     }
+
+    /// Sending images shows upload progress as a ring + percentage on the
+    /// thumbnails, never a banner above the composer.
+    func testImageUploadShowsRingOnThumbnail() {
+        let size = CGSize(width: 240, height: 180)
+        UIPasteboard.general.image = UIGraphicsImageRenderer(size: size).image { ctx in
+            UIColor.systemTeal.setFill(); ctx.fill(CGRect(origin: .zero, size: size))
+            UIColor.systemPink.setFill(); ctx.fill(CGRect(x: 60, y: 40, width: 120, height: 100))
+        }
+        let app = launch(["-route", "chat:chat-deploy"], fast: false)
+        let input = app.textViews["composer-input"]
+        XCTAssertTrue(input.waitForExistence(timeout: 10))
+        app.buttons["composer-attach"].tap()
+        let paste = app.buttons["Paste Image"]
+        XCTAssertTrue(paste.waitForExistence(timeout: 5))
+        paste.tap()
+        let allow = XCUIApplication(bundleIdentifier: "com.apple.springboard").buttons["Allow Paste"]
+        if allow.waitForExistence(timeout: 2) { allow.tap() }
+        input.tap()
+        input.typeText("What's in this image?")
+        app.buttons["composer-send"].tap()
+        let ring = app.descendants(matching: .any)["upload-progress"].firstMatch
+        XCTAssertTrue(ring.waitForExistence(timeout: 5), "ring on the pending thumbnail")
+        snapshot(app, "upload-ring")
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Uploading'")).firstMatch.exists, "no upload banner")
+        XCTAssertTrue(app.staticTexts.matching(identifier: "row-markdown").element(boundBy: 0).waitForExistence(timeout: 20), "the turn runs once uploaded")
+    }
 }

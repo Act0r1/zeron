@@ -349,6 +349,30 @@ impl DemoHost {
                 SessionCommandPayload::Run {
                     request,
                     message_id,
+                } if request.prompt.contains("pending://") => {
+                    // Escort the attachments like a live host (upload
+                    // progress on the session) before the turn runs.
+                    let this = self.clone();
+                    let chat = chat_id.to_owned();
+                    let issued_by = command.issued_by.clone();
+                    let core = core.clone();
+                    crate::runtime::shared().spawn(async move {
+                        const STEPS: u32 = 24;
+                        for i in 1..=STEPS {
+                            core.set_transfer_progress(Some(i as f64 / STEPS as f64));
+                            tokio::time::sleep(Duration::from_millis(110)).await;
+                        }
+                        core.set_transfer_progress(None);
+                        let Ok(client) = this.client() else { return };
+                        let host = this.host_of(&client, &chat);
+                        let prompt = this.adopt_attachments(&client, &host, &request.prompt);
+                        let steps = this.reply_for(&prompt);
+                        this.spawn_turn(chat, Some((message_id, prompt, issued_by)), steps, None);
+                    });
+                }
+                SessionCommandPayload::Run {
+                    request,
+                    message_id,
                 } => {
                     let prompt = self.adopt_attachments(&client, &host, &request.prompt);
                     let steps = self.reply_for(&prompt);

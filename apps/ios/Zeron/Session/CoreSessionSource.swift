@@ -72,13 +72,12 @@ final class CoreSessionSource: SessionSource {
             next.banner = .notDelivered
         } else if c.sendState == .queued {
             next.banner = .failed("\(c.host.name ?? "Host") is offline — will send when it's back")
-        } else if let p = c.transferProgress {
-            next.banner = .uploading(progress: p)
         } else if app?.connectivity?.state == .offline {
             next.banner = .offline
         } else if !c.room.connected, let retry = c.room.retryAtMs {
             next.banner = .reconnecting(in: max(1, Int((retry - Int64(Date().timeIntervalSince1970 * 1000)) / 1000)))
         }
+        next.uploadProgress = c.transferProgress
         // Working state is shown at the transcript tail (layout engine), not here.
         if let input = c.openInput {
             next.questions = (input.requestId, input.questions.map {

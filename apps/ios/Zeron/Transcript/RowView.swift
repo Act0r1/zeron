@@ -58,6 +58,11 @@ final class RowView: UIView {
         set {}
     }
     weak var delegate: RowViewDelegate?
+    /// Rings over thumbnails still uploading (`pending://` refs).
+    private var uploadRings: [UploadRingView] = []
+    var uploadProgress: Double? {
+        didSet { if uploadProgress != oldValue { uploadRings.forEach { $0.progress = uploadProgress } } }
+    }
     var key: UInt64 { model?.display.key ?? 0 }
     var version: UInt64 { model?.display.version ?? 0 }
     var kind: RowKind = .markdown
@@ -154,6 +159,7 @@ final class RowView: UIView {
     }
 
     private func layoutWidgets(_ d: RowDisplay) {
+        uploadRings.removeAll()
         for v in widgetViews { v.removeFromSuperview() }
         widgetViews.removeAll(keepingCapacity: true)
         for w in d.widgets {
@@ -183,6 +189,16 @@ final class RowView: UIView {
                 iv.accessibilityTraits = .image
                 iv.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(openImage(_:))))
                 delegate?.rowView(self, imageFor: reference, into: iv)
+                if reference.hasPrefix("pending://") {
+                    // Size the thumbnail first: autoresizing from a zero frame
+                    // would double the ring when the widget frame lands.
+                    iv.frame = rect
+                    let ring = UploadRingView(frame: CGRect(origin: .zero, size: rect.size))
+                    ring.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+                    ring.progress = uploadProgress
+                    iv.addSubview(ring)
+                    uploadRings.append(ring)
+                }
                 view = iv
             case .spinner:
                 view = StatusGlyph(.spinner)
@@ -396,5 +412,62 @@ final class WorkingIndicatorView: UIView {
         super.layoutSubviews()
         grid.frame = CGRect(x: 0, y: (bounds.height - 14) / 2, width: 14, height: 14)
         label.frame = CGRect(x: 22, y: (bounds.height - label.bounds.height) / 2, width: label.bounds.width, height: label.bounds.height)
+    }
+}
+
+/// Upload progress over a pending thumbnail: a light scrim, a ring that fills
+/// with the transfer, and the percentage. Fades away when the upload ends.
+final class UploadRingView: UIView {
+    private let track = CAShapeLayer()
+    private let arc = CAShapeLayer()
+    private let label = UILabel()
+
+    var progress: Double? {
+        didSet {
+            guard let p = progress else {
+                UIView.animate(withDuration: 0.25) { self.alpha = 0 }
+                return
+            }
+            if alpha < 1 { UIView.animate(withDuration: 0.2) { self.alpha = 1 } }
+            arc.strokeEnd = CGFloat(max(0.02, min(1, p)))
+            label.text = "\(Int((min(1, max(0, p)) * 100).rounded()))%"
+            accessibilityValue = label.text
+        }
+    }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        backgroundColor = UIColor.black.withAlphaComponent(0.38)
+        alpha = 0
+        for l in [track, arc] {
+            l.fillColor = nil
+            l.lineWidth = 3
+            l.lineCap = .round
+            layer.addSublayer(l)
+        }
+        track.strokeColor = UIColor.white.withAlphaComponent(0.3).cgColor
+        arc.strokeColor = UIColor.white.cgColor
+        arc.strokeEnd = 0
+        label.font = Fonts.ui(.sansSemibold, 11)
+        label.textColor = .white
+        label.textAlignment = .center
+        addSubview(label)
+        isAccessibilityElement = true
+        accessibilityLabel = "Uploading"
+        accessibilityIdentifier = "upload-progress"
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let d = min(34, min(bounds.width, bounds.height) * 0.55)
+        let r = CGRect(x: bounds.midX - d / 2, y: bounds.midY - d / 2, width: d, height: d)
+        let path = UIBezierPath(arcCenter: CGPoint(x: r.midX, y: r.midY), radius: d / 2, startAngle: -.pi / 2, endAngle: 1.5 * .pi, clockwise: true).cgPath
+        track.path = path
+        arc.path = path
+        label.frame = r
+        label.font = Fonts.ui(.sansSemibold, d < 30 ? 9 : 10.5)
     }
 }

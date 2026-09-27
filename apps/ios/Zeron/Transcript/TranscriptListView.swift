@@ -20,6 +20,14 @@ final class TranscriptListView: UIScrollView, RowViewDelegate, UIScrollViewDeleg
     /// Rows are realized this far beyond the viewport (and prefetched further).
     var overscan: CGFloat = 700
 
+    /// Attachment upload progress: rings on pending thumbnails.
+    var uploadProgress: Double? {
+        didSet {
+            guard uploadProgress != oldValue else { return }
+            for v in visible.values { v.uploadProgress = uploadProgress }
+        }
+    }
+
     /// Following the tail: new content keeps the bottom in view.
     private(set) var following = true
     var onFollowChange: ((Bool) -> Void)?
@@ -249,6 +257,7 @@ final class TranscriptListView: UIScrollView, RowViewDelegate, UIScrollViewDeleg
                 upgradeAsync(p, frame: frame)
             } else if stale {
                 view.configure(model(for: p, frame: frame), kind: p.kind)
+                view.uploadProgress = uploadProgress
                 if !knownKeys.contains(p.key) {
                     knownKeys.insert(p.key)
                     view.alpha = 0
@@ -325,6 +334,7 @@ final class TranscriptListView: UIScrollView, RowViewDelegate, UIScrollViewDeleg
                 if let view = self.visible[p.key], let current = self.current,
                    let i = current.indexOf(key: p.key), current.placement(index: i)?.version == p.version {
                     view.configure(model, kind: p.kind)
+                    view.uploadProgress = self.uploadProgress
                 }
             }
         }

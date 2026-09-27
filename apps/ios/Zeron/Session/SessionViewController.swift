@@ -304,6 +304,7 @@ final class SessionViewController: UIViewController, UIGestureRecognizerDelegate
         let old = shown
         shown = c
         titleView.set(title: c.title, subtitle: c.subtitle)
+        list.uploadProgress = c.uploadProgress
         composer.running = c.running
         composer.canSteer = c.canSteer
         composer.placeholder = c.placeholder
@@ -498,9 +499,6 @@ final class StatusPill: UIControl {
         case .notDelivered:
             grid.kind = .dot(Palette.danger)
             label.text = "Not delivered · Tap to retry"
-        case let .uploading(p):
-            grid.kind = .spinner
-            label.text = "Uploading… \(Int(p * 100))%"
         case let .failed(message):
             grid.kind = .dot(Palette.danger)
             label.text = message

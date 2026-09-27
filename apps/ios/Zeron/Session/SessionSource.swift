@@ -9,7 +9,6 @@ struct SessionChrome: Equatable {
         case offline
         case reconnecting(in: Int)
         case notDelivered
-        case uploading(progress: Double)
         case failed(String)
         case editing
     }
@@ -21,6 +20,10 @@ struct SessionChrome: Equatable {
         let options: [String]
         let multiSelect: Bool
     }
+
+    /// Attachment upload progress (0…1) while images are escorted to the
+    /// host — drawn as a ring on the pending thumbnails, not a banner.
+    var uploadProgress: Double?
 
     struct QueuedItem: Equatable {
         let id: String
