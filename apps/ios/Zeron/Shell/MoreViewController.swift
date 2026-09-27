@@ -125,6 +125,20 @@ final class MoreViewController: UIViewController, UICollectionViewDelegate {
             UserDefaults.standard.set(style, forKey: "appearance")
             view.window?.overrideUserInterfaceStyle = UIUserInterfaceStyle(rawValue: style) ?? .unspecified
             reload()
+        case "wallpaper:choose":
+            WallpaperPicker.present(from: self)
+        case "wallpaper:effect":
+            let sheet = UIAlertController(title: "Wallpaper Effect", message: nil, preferredStyle: .actionSheet)
+            for e in WallpaperStore.allEffects {
+                let action = UIAlertAction(title: WallpaperStore.label(e), style: .default) { _ in WallpaperStore.effect = e }
+                action.setValue(e == WallpaperStore.effect, forKey: "checked")
+                sheet.addAction(action)
+            }
+            sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+            sheet.popoverPresentationController?.sourceView = collectionView.cellForItem(at: path)
+            present(sheet, animated: true)
+        case "wallpaper:remove":
+            WallpaperStore.remove()
         case "archived":
             navigationController?.pushViewController(FolderViewController(app: app, folder: FolderRowVM(id: "archived", name: "Archived", count: 0, symbol: "archivebox")), animated: true)
         case "signout":
