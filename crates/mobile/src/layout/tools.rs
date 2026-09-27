@@ -222,7 +222,11 @@ fn lines_block(ctx: &mut Ctx, st: &Styles, text: &str, wrap: Option<usize>) -> O
 
 fn diff_block(ctx: &mut Ctx, st: &Styles, diff: &zeron_proto::ToolDiff) -> Option<DetailBlock> {
     let old = diff.old_text.as_deref().unwrap_or("");
-    let text_diff = similar::TextDiff::from_lines(old, &diff.new_text);
+    // Bounded: a huge rewrite falls back to a coarser diff instead of
+    // stalling the layout worker (the transcript would stop updating).
+    let text_diff = similar::TextDiff::configure()
+        .timeout(std::time::Duration::from_millis(100))
+        .diff_lines(old, &diff.new_text);
     let mut raw: Vec<(DiffKind, Option<u32>, Option<u32>, String)> = Vec::new();
     for group in text_diff.grouped_ops(3) {
         let (Some(first), Some(last)) = (group.first(), group.last()) else { continue };
