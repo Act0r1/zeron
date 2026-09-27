@@ -10,7 +10,7 @@ protocol AppRouter: AnyObject {
 }
 
 /// iPad shell: Zeron mobile with a sidebar. The sidebar is the phone's
-/// Sessions page (same rows, sections, wallpaper), new session top-left;
+/// Sessions page (same rows, sections, wallpaper) over a bottom toolbar;
 /// the main column shows the open session or the phone's new-session page.
 /// Compact widths (Slide Over, narrow Split View) collapse to the iPhone tab
 /// shell.
@@ -136,8 +136,9 @@ final class SplitRootController: UISplitViewController, UISplitViewControllerDel
 }
 
 /// The iPad sidebar: the phone's Sessions page in its own navigation stack
-/// (sections, folders, Archived push inside it): new session top-left,
-/// Settings beside the options menu, search in the bar.
+/// (sections, folders, Archived push inside it), search in the bar, and
+/// the actions in a toolbar at the bottom: Settings and options on the
+/// left, new session on the right, within thumb reach.
 final class SidebarViewController: UIViewController, UISearchResultsUpdating {
     private let app: AppModel
     private let list: SessionsViewController
@@ -176,19 +177,23 @@ final class SidebarViewController: UIViewController, UISearchResultsUpdating {
         list.navigationItem.searchController = search
         list.navigationItem.hidesSearchBarWhenScrolling = false
         list.navigationItem.preferredSearchBarPlacement = .stacked
-        let settings = UIBarButtonItem(image: UIImage(named: "tab-settings"), primaryAction: UIAction { [weak self] _ in
+        let settings = UIBarButtonItem(image: UIImage(systemName: "gearshape"), primaryAction: UIAction { [weak self] _ in
             self?.router?.showSettings()
         })
         settings.accessibilityLabel = "Settings"
         settings.accessibilityIdentifier = "sidebar-settings"
-        list.navigationItem.rightBarButtonItems = [list.navigationItem.rightBarButtonItem, settings].compactMap { $0 }
-
-        let compose = UIBarButtonItem(image: UIImage(systemName: "square.and.pencil"), primaryAction: UIAction { [weak self] _ in
+        let options = UIBarButtonItem(image: UIImage(systemName: "ellipsis"), menu: list.optionsMenu())
+        options.accessibilityLabel = "Options"
+        let compose = UIBarButtonItem(image: UIImage(systemName: "plus"), primaryAction: UIAction { [weak self] _ in
             self?.router?.presentNewSession(prompt: nil)
         })
+        compose.style = .prominent
+        compose.tintColor = Palette.accent
         compose.accessibilityLabel = "New session"
         compose.accessibilityIdentifier = "new-session"
-        list.navigationItem.leftBarButtonItem = compose
+        list.navigationItem.rightBarButtonItem = nil
+        list.toolbarItems = [settings, options, .flexibleSpace(), compose]
+        nav.isToolbarHidden = false
 
         // A hairline between the sidebar and the main column.
         let edge = UIView()
