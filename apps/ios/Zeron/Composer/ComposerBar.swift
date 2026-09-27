@@ -46,7 +46,18 @@ final class ComposerBar: UIView, UITextViewDelegate, UIGestureRecognizerDelegate
     }
 
     // Callbacks
-    var onSend: ((String, [StagedImage], DeliveryMode) -> Void)?
+    /// What happened to a send, so the composer knows whether to clear.
+    enum SendResult {
+        /// Taken: the composer clears.
+        case sent
+        /// Not taken (e.g. couldn't start the session): text and images stay.
+        case kept
+        /// Taken, and the handler already put the composer's next contents in
+        /// place (committing a queued edit restores the stashed draft).
+        case replaced
+    }
+
+    var onSend: ((String, [StagedImage], DeliveryMode) -> SendResult)?
     var onStop: (() -> Void)?
     var attachMenu: (() -> UIMenu)?
     var onChipTap: ((String, UIView) -> Void)?
@@ -65,7 +76,7 @@ final class ComposerBar: UIView, UITextViewDelegate, UIGestureRecognizerDelegate
     var chipMenus: [String: () -> UIMenu?] = [:] { didSet { applyChipMenus() } }
     /// Stay in the card state even when idle (new-session canvas).
     var chipsAlwaysVisible = false { didSet { updateMode(animated: false) } }
-    private(set) var images: [StagedImage] = [] { didSet { rebuildThumbs(); refreshAction(animated: true); updateMode(animated: true) } }
+    var images: [StagedImage] = [] { didSet { rebuildThumbs(); refreshAction(animated: true); updateMode(animated: true) } }
 
     var text: String {
         get { textView.text }
@@ -630,9 +641,11 @@ final class ComposerBar: UIView, UITextViewDelegate, UIGestureRecognizerDelegate
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         let body = mentions.encode(textView.text.trimmingCharacters(in: .whitespacesAndNewlines))
         let staged = images
-        onSend?(body, staged, mode)
+        let result = onSend?(body, staged, mode) ?? .sent
+        guard result != .kept else { return }
         mentions.reset()
         setSuggestionsVisible(false)
+        guard result == .sent else { return }
         textView.text = ""
         images = []
         textChanged()

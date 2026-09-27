@@ -1,5 +1,7 @@
+import ImageIO
 import PhotosUI
 import UIKit
+import UniformTypeIdentifiers
 
 /// The chat wallpaper (desktop "new thread background"): one image plus an
 /// effect, stored locally. Effects and the contrast guard run in the Rust core
@@ -77,6 +79,26 @@ enum WallpaperStore {
         try? resized.jpegData(compressionQuality: 0.9)?.write(to: imageURL, options: .atomic)
         UserDefaults.standard.set(name, forKey: "wallpaperName")
         changed()
+    }
+
+    /// Store a picked photo straight from its file, downsampled while it's
+    /// decoded (a 48MP photo never becomes a full-size bitmap), off the main
+    /// thread; notifies on main.
+    static func set(fileURL: URL, name: String) {
+        let options = [kCGImageSourceShouldCache: false] as CFDictionary
+        guard let source = CGImageSourceCreateWithURL(fileURL as CFURL, options),
+              let thumb = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                  kCGImageSourceCreateThumbnailFromImageAlways: true,
+                  kCGImageSourceCreateThumbnailWithTransform: true,
+                  kCGImageSourceThumbnailMaxPixelSize: 1600,
+              ] as CFDictionary),
+              let data = UIImage(cgImage: thumb).jpegData(compressionQuality: 0.9)
+        else { return }
+        try? data.write(to: imageURL, options: .atomic)
+        DispatchQueue.main.async {
+            UserDefaults.standard.set(name, forKey: "wallpaperName")
+            changed()
+        }
     }
 
     static func remove() {
@@ -280,15 +302,14 @@ final class WallpaperPicker: NSObject, PHPickerViewControllerDelegate {
 
     func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
         picker.dismiss(animated: true)
-        guard let provider = results.first?.itemProvider, provider.canLoadObject(ofClass: UIImage.self) else {
+        guard let provider = results.first?.itemProvider, provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) else {
             retainSelf = nil
             return
         }
         let name = provider.suggestedName ?? "Photo"
-        provider.loadObject(ofClass: UIImage.self) { [weak self] object, _ in
-            if let image = object as? UIImage {
-                DispatchQueue.main.async { WallpaperStore.set(image, name: name) }
-            }
+        // The file, not a decoded UIImage: it's downsampled as it's read.
+        provider.loadFileRepresentation(forTypeIdentifier: UTType.image.identifier) { [weak self] url, _ in
+            if let url { WallpaperStore.set(fileURL: url, name: name) }
             self?.retainSelf = nil
         }
     }

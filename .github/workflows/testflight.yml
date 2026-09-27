@@ -24,7 +24,8 @@ jobs:
   upload:
     if: github.ref == 'refs/heads/main'
     runs-on: macos-latest
-    timeout-minutes: 45
+    # Cold Rust core build (release profile, thin LTO) + archive + processing.
+    timeout-minutes: 90
     env:
       AC_API_KEY_P8: ${{ secrets.AC_API_KEY_P8 }}
       AC_API_KEY_ID: ${{ secrets.AC_API_KEY_ID }}
@@ -102,6 +103,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ios-core
+          cache-on-failure: true
 
       - name: Xcode version
         run: xcodebuild -version

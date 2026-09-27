@@ -19,6 +19,8 @@ class SessionListController: UIViewController, UICollectionViewDelegate {
     private var token: AnyObject?
     /// Show drag handles in edit mode (Pinned).
     var reorderable = false
+    /// The Archived list: rows offer Unarchive instead of Archive / Pin / Move.
+    var archivedRows = false
     /// The session open beside this list (iPad sidebar): drawn as current.
     var currentChatId: String? {
         didSet {
@@ -220,7 +222,7 @@ class SessionListController: UIViewController, UICollectionViewDelegate {
     }
 
     private func leadingSwipe(_ path: IndexPath) -> UISwipeActionsConfiguration? {
-        guard let id = sessionId(path), let vm = sessions[id] else { return nil }
+        guard !archivedRows, let id = sessionId(path), let vm = sessions[id] else { return nil }
         let pin = UIContextualAction(style: .normal, title: vm.pinned ? "Unpin" : "Pin") { [weak self] _, _, done in
             self?.app.setPinned(id, !vm.pinned)
             done(true)
@@ -232,6 +234,15 @@ class SessionListController: UIViewController, UICollectionViewDelegate {
 
     private func trailingSwipe(_ path: IndexPath) -> UISwipeActionsConfiguration? {
         guard let id = sessionId(path) else { return nil }
+        if archivedRows {
+            let restore = UIContextualAction(style: .normal, title: "Unarchive") { [weak self] _, _, done in
+                self?.app.unarchive(id)
+                done(true)
+            }
+            restore.image = UIImage(systemName: "tray.and.arrow.up.fill")
+            restore.backgroundColor = Palette.accent
+            return UISwipeActionsConfiguration(actions: [restore])
+        }
         let archive = UIContextualAction(style: .destructive, title: "Archive") { [weak self] _, _, done in
             self?.app.archive(id)
             done(true)
@@ -254,6 +265,12 @@ class SessionListController: UIViewController, UICollectionViewDelegate {
         guard let path = indexPaths.first, let id = sessionId(path), let vm = sessions[id] else { return nil }
         return UIContextMenuConfiguration(identifier: id as NSString, previewProvider: nil) { [weak self] _ in
             guard let self else { return nil }
+            if self.archivedRows {
+                return UIMenu(children: [
+                    UIAction(title: "Unarchive", image: UIImage(systemName: "tray.and.arrow.up")) { _ in self.app.unarchive(id) },
+                    UIAction(title: "Rename…", image: UIImage(systemName: "pencil")) { _ in self.rename(id) },
+                ])
+            }
             return UIMenu(children: [
                 UIAction(title: vm.pinned ? "Unpin" : "Pin", image: UIImage(systemName: vm.pinned ? "pin.slash" : "pin")) { _ in self.app.setPinned(id, !vm.pinned) },
                 self.moveMenu(id),
@@ -410,6 +427,7 @@ final class FolderViewController: SessionListController {
     required init?(coder: NSCoder) { fatalError() }
 
     override func viewDidLoad() {
+        archivedRows = folder.id == "archived"
         super.viewDidLoad()
         title = folder.name
         navigationItem.largeTitleDisplayMode = .always
@@ -470,6 +488,8 @@ final class FolderViewController: SessionListController {
             self.navigationController?.popViewController(animated: true)
         })
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        // iPad presents action sheets as popovers: anchor it to the ⋯ button.
+        alert.popoverPresentationController?.barButtonItem = navigationItem.rightBarButtonItem
         present(alert, animated: true)
     }
 }

@@ -124,14 +124,44 @@ final class SplitRootController: UISplitViewController, UISplitViewControllerDel
         sidebar.focusSearch()
     }
 
+    /// A session came on screen in either shell (sidebar, tabs, search):
+    /// it's the one to keep across a width change.
+    func sessionDidAppear(_ chatId: String) {
+        currentChatId = chatId
+        sidebar.currentChatId = chatId
+    }
+
     // MARK: Collapse / expand
 
-    /// Narrowing to compact carries the open session into the tab shell.
+    /// Narrowing to compact carries the open session into the tab shell; the
+    /// column lets go of its copy (one live view per session).
     func splitViewController(_ svc: UISplitViewController, topColumnForCollapsingToProposedTopColumn proposed: UISplitViewController.Column) -> UISplitViewController.Column {
-        if let chatId = currentChatId {
-            DispatchQueue.main.async { self.tabs.openSession(chatId) }
+        let chatId = currentChatId
+        DispatchQueue.main.async {
+            if self.detail.viewControllers.first is SessionViewController {
+                self.detail.setViewControllers([], animated: false)
+            }
+            if let chatId { self.tabs.openSession(chatId) }
         }
         return .compact
+    }
+
+    /// Widening back brings the session last open in the tab shell into the
+    /// main column (or the new-session page when none was).
+    func splitViewController(_ svc: UISplitViewController, displayModeForExpandingToProposedDisplayMode proposed: UISplitViewController.DisplayMode) -> UISplitViewController.DisplayMode {
+        DispatchQueue.main.async {
+            self.tabs.popToFrontPage()
+            let shown = (self.detail.viewControllers.first as? SessionViewController)?.chatId
+            if let chatId = self.currentChatId {
+                if shown != chatId {
+                    self.detail.setViewControllers([SessionViewController(app: self.app, chatId: chatId)], animated: false)
+                }
+                self.sidebar.currentChatId = chatId
+            } else if self.detail.viewControllers.isEmpty {
+                self.showDraft(prompt: nil, focus: false)
+            }
+        }
+        return proposed
     }
 }
 

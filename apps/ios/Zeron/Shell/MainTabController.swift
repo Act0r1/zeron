@@ -156,6 +156,13 @@ final class MainTabController: UITabBarController, UITabBarControllerDelegate, A
         }
     }
 
+    /// Back to the Sessions list, releasing any pushed session (the iPad
+    /// split takes the open session back into its own column).
+    func popToFrontPage() {
+        guard let nav = tabs.first(where: { $0.identifier == "sessions" })?.viewController as? UINavigationController else { return }
+        nav.popToRootViewController(animated: false)
+    }
+
     /// Push a session on the Sessions tab (from new-session, deep links, search).
     func openSession(_ chatId: String) {
         if presentedViewController != nil { dismiss(animated: true) }

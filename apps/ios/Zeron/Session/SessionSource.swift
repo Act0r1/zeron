@@ -58,7 +58,11 @@ protocol SessionSource: AnyObject {
     /// Bind the Rust layout engine to this session's transcript.
     func attach(_ engine: TranscriptView)
     func detach()
-    func send(text: String, images: [StagedImage], mode: DeliveryMode)
+    /// The session's screen is showing again (another copy may have detached).
+    func reattach()
+    /// False when the message wasn't taken (it stays in the composer).
+    @discardableResult
+    func send(text: String, images: [StagedImage], mode: DeliveryMode) -> Bool
     func stop()
     func answer(requestId: String, answers: [(questionId: String, labels: [String])])
     func queueAction(_ id: String, _ action: QueueAction)
@@ -116,16 +120,18 @@ final class FixtureSessionSource: SessionSource {
         timer?.invalidate()
     }
 
+    func reattach() {}
+
     private func update(_ change: (inout SessionChrome) -> Void) {
         let old = chrome
         change(&chrome)
         if chrome != old { onChange?() }
     }
 
-    func send(text: String, images: [StagedImage], mode: DeliveryMode) {
+    func send(text: String, images: [StagedImage], mode: DeliveryMode) -> Bool {
         if chrome.running, mode == .queue {
             update { $0.queue.append(.init(id: UUID().uuidString, text: text, thumbnail: images.first?.thumbnail, gate: nil)) }
-            return
+            return true
         }
         timer?.invalidate()
         let n = entries.count
@@ -150,6 +156,7 @@ final class FixtureSessionSource: SessionSource {
             self.engine?.setDebugEntries(entries: self.entries, working: last.streaming)
             if !last.streaming { self.finish() }
         }
+        return true
     }
 
     private func finish() {

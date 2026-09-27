@@ -25,6 +25,7 @@ final class AppModel {
     private(set) var live = LiveCounts()
     private var rows: [String: SessionRow] = [:]
     private var rawProjects: [ProjectView] = []
+    private var lastHosts: [HostOption] = []
     private var workspaceRevision: UInt64 = 0
     private var observers: [UUID: () -> Void] = [:]
     private var sessionObservers: [String: [UUID: () -> Void]] = [:]
@@ -53,12 +54,18 @@ final class AppModel {
         }
         path.start(queue: DispatchQueue(label: "sh.zeron.path"))
         let args = ProcessInfo.processInfo.arguments
+        #if DEBUG
+        // Test hooks (never in release builds): wipe the Keychain, or run
+        // against a local dev stack.
         if args.contains("-signedout") {
             Credentials.clearStored()
         }
         if let i = args.firstIndex(of: "-dev"), i + 2 < args.count {
             start(.dev(userId: args[i + 1], orgId: args[i + 2]))
-        } else if args.contains("-demo") || args.contains("-route") && Credentials.stored() == nil {
+            return
+        }
+        #endif
+        if args.contains("-demo") || args.contains("-route") && Credentials.stored() == nil {
             start(.demo(options: Self.demoOptions()))
         } else if let stored = Credentials.stored() {
             start(stored)
@@ -78,9 +85,31 @@ final class AppModel {
 
     // MARK: Lifecycle
 
-    private func start(_ credentials: Credentials) {
+    private static var coreDir: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("core", isDirectory: true)
+    }
+
+    /// Local docs belong to one identity: another account/org starts from an
+    /// empty store (it must never see — or sync — the last one's cache).
+    private static func claimCoreDir(for credentials: Credentials) {
+        let owner: String
+        switch credentials {
+        case let .workOs(userId, orgId, _), let .dev(userId, orgId): owner = "\(userId)/\(orgId)"
+        case .demo: return
+        }
+        let marker = coreDir.appendingPathComponent(".owner")
+        if (try? String(contentsOf: marker, encoding: .utf8)) != owner {
+            try? FileManager.default.removeItem(at: coreDir)
+        }
+        try? FileManager.default.createDirectory(at: coreDir, withIntermediateDirectories: true)
+        try? owner.write(to: marker, atomically: true, encoding: .utf8)
+    }
+
+    @discardableResult
+    private func start(_ credentials: Credentials) -> Bool {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        let dir = support.appendingPathComponent(credentials.isDemo ? "demo" : "core", isDirectory: true)
+        let dir = credentials.isDemo ? support.appendingPathComponent("demo", isDirectory: true) : Self.coreDir
+        if !credentials.isDemo { Self.claimCoreDir(for: credentials) }
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let config = CoreConfig(
             edgeUrl: Self.edgeURL,
@@ -101,16 +130,20 @@ final class AppModel {
             clock?.invalidate()
             // Relative times ("4m") and 45s staleness age without events.
             clock = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in self?.refreshWorkspace() }
+            return true
         } catch {
             NSLog("core start failed: \(error)")
             client = nil
+            return false
         }
     }
 
     /// `-edge <url>` points at a local `wrangler dev` edge; otherwise production.
     static var edgeURL: String {
+        #if DEBUG
         let args = ProcessInfo.processInfo.arguments
         if let i = args.firstIndex(of: "-edge"), i + 1 < args.count { return args[i + 1] }
+        #endif
         return Endpoints.edgeURL.absoluteString
     }
 
@@ -132,10 +165,9 @@ final class AppModel {
         let user = exchange.user
         let name = [user.firstName, user.lastName].compactMap { $0?.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }.joined(separator: " ")
         AccountProfile(name: name.nonEmpty, email: user.email, orgName: org.name).save()
-        await MainActor.run {
-            start(.workOs(userId: exchange.user.id, orgId: org.organizationId, tokens: tokens))
-            onSignedIn?()
-        }
+        let started = await MainActor.run { start(.workOs(userId: exchange.user.id, orgId: org.organizationId, tokens: tokens)) }
+        guard started else { throw CoreError.Auth(message: "Couldn't open your workspace. Try signing in again.") }
+        await MainActor.run { onSignedIn?() }
     }
 
     func signOut() { onSignOut?() }
@@ -145,8 +177,19 @@ final class AppModel {
         client = nil
         Credentials.clearStored()
         AccountProfile.clear()
-        frontPage = FrontPage()
         clock?.invalidate()
+        // Nothing of this account survives: its local docs and every
+        // in-memory projection of them.
+        try? FileManager.default.removeItem(at: Self.coreDir)
+        frontPage = FrontPage()
+        archived = []
+        rows = [:]
+        rawProjects = []
+        lastHosts = []
+        connectivity = nil
+        live = LiveCounts()
+        workspaceRevision = 0
+        lastDraft = NewSessionDraft()
     }
 
     func didEnterBackground() { client?.onBackground() }
@@ -170,7 +213,11 @@ final class AppModel {
             let wait = max(0, minimum - Date().timeIntervalSince(started))
             DispatchQueue.main.asyncAfter(deadline: .now() + wait, execute: completion)
         }
-        token = observe { finish() }
+        // A reconnecting/offline blip from the redial isn't the resync landing.
+        token = observe { [weak self] in
+            if let state = self?.connectivity?.state, state == .reconnecting || state == .offline { return }
+            finish()
+        }
         client?.onForeground()
         refreshWorkspace()
         DispatchQueue.main.asyncAfter(deadline: .now() + maximum) {
@@ -260,7 +307,10 @@ final class AppModel {
             if row.status == .awaiting { counts.awaiting += 1 }
         }
         rows = all
-        let changed = page != frontPage || archivedVMs != archived || counts != live
+        // Devices coming and going (Settings, host pickers) count as changes.
+        let hosts = hostOptions
+        let changed = page != frontPage || archivedVMs != archived || counts != live || hosts != lastHosts
+        lastHosts = hosts
         live = counts
         frontPage = page
         archived = archivedVMs

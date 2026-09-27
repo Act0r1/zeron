@@ -32,6 +32,10 @@ final class CoreSessionSource: SessionSource {
         handle.setViewAttached(attached: false)
     }
 
+    func reattach() {
+        handle.setViewAttached(attached: true)
+    }
+
     private func refresh() {
         let c = handle.composer()
         let row = app?.row(chatId)
@@ -68,7 +72,9 @@ final class CoreSessionSource: SessionSource {
             }
         }
         next.chips = chips
-        if c.sendState == .failed {
+        if let sendFailure {
+            next.banner = .failed(sendFailure)
+        } else if c.sendState == .failed {
             next.banner = .notDelivered
         } else if c.sendState == .queued {
             next.banner = .failed("\(c.host.name ?? "Host") is offline — will send when it's back")
@@ -99,15 +105,23 @@ final class CoreSessionSource: SessionSource {
         }
     }
 
-    func send(text: String, images: [StagedImage], mode: DeliveryMode) {
+    /// False when the core refused the message (it stays in the composer).
+    @discardableResult
+    func send(text: String, images: [StagedImage], mode: DeliveryMode) -> Bool {
         do {
             if mode == .interrupt, chrome.running { try handle.interrupt() }
             _ = try handle.send(request: SendRequest(text: text, attachments: images.map(\.outgoing), worktree: nil, busy: mode == .steer ? .steer : .queue))
+            sendFailure = nil
+            return true
         } catch {
-            chrome.banner = .failed("Couldn't send: \(error)")
-            onChange?()
+            // Kept across refreshes (which rebuild the chrome) until the next send.
+            sendFailure = "Couldn't send: \(error)"
+            refresh()
+            return false
         }
     }
+
+    private var sendFailure: String?
 
     func stop() {
         try? handle.interrupt()
@@ -129,6 +143,9 @@ final class CoreSessionSource: SessionSource {
 
     private var lease: QueueEditLease?
     private var renewal: Task<Void, Never>?
+    /// The row as it was when the edit began: the composer only edits its
+    /// visible text, the rest (Appshot context, attachment trailer) rides along.
+    private var editBase: (raw: String, visible: String)?
 
     func beginEdit(_ id: String) async -> String? {
         let start = await handle.beginQueuedEdit(id: id, instanceId: UUID().uuidString)
@@ -142,14 +159,34 @@ final class CoreSessionSource: SessionSource {
                 if await !self.handle.renewQueuedEdit(lease: lease) { return }
             }
         }
-        return handle.composer().queue.first { $0.id == id }?.visibleText
+        guard let item = handle.composer().queue.first(where: { $0.id == id }) else { return nil }
+        editBase = (item.text, item.visibleText)
+        return item.visibleText
     }
 
     func finishEdit(text: String?) async {
         renewal?.cancel()
+        let base = editBase
+        editBase = nil
         guard let lease else { return }
         self.lease = nil
-        _ = await handle.finishQueuedEdit(lease: lease, action: text == nil ? .cancel : .commit, text: text)
+        var body = text
+        if let edited = text, let base {
+            // Unchanged: release the row as it was (a commit would drop what
+            // the composer never showed).
+            body = edited == base.visible ? nil : Self.replacingVisible(in: base.raw, visible: base.visible, with: edited)
+        }
+        _ = await handle.finishQueuedEdit(lease: lease, action: body == nil ? .cancel : .commit, text: body)
+    }
+
+    /// The row's raw text with its visible part replaced, keeping the hidden
+    /// context after it. Blank edits stay blank (the host removes the row).
+    static func replacingVisible(in raw: String, visible: String, with edited: String) -> String {
+        if edited.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || raw == visible { return edited }
+        let body = raw.drop(while: \.isWhitespace)
+        if body.hasPrefix(visible) { return edited + body.dropFirst(visible.count) }
+        // Attachment-only rows show a placeholder: all of the raw text is context.
+        return body.isEmpty ? edited : edited + "\n\n" + body
     }
 
     func retryDelivery() {
@@ -209,6 +246,9 @@ final class CoreSessionSource: SessionSource {
     private static let images = NSCache<NSString, UIImage>()
 
     func loadImage(_ reference: String, into view: UIImageView) {
+        // Claim the view first: a slower load for a row it used to show
+        // must not land on top of this one.
+        view.accessibilityIdentifier = reference
         if let hit = Self.images.object(forKey: reference as NSString) {
             view.image = hit
             return

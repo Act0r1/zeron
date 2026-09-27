@@ -34,7 +34,10 @@ final class TranscriptLabViewController: UIViewController {
             guard let self else { return UIMenu() }
             return AttachmentPicker.menu(host: self, limit: 8) { [weak self] in self?.composer.addImages($0) }
         }
-        composer.onSend = { [weak self] text, _, _ in self?.send(text) }
+        composer.onSend = { [weak self] text, _, _ in
+            self?.send(text)
+            return .sent
+        }
         composer.onStop = { [weak self] in self?.stopStream() }
         composer.onHeightChange = { [weak self] in self?.view.setNeedsLayout() }
         view.addSubview(composer)

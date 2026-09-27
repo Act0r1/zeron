@@ -58,6 +58,11 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         let root: UIViewController = !app.isSignedIn
             ? SignInViewController(app: app)
             : UIDevice.current.userInterfaceIdiom == .pad ? SplitRootController(app: app) : MainTabController(app: app)
+        // Sheets (new session, Settings) belong to the old root: they'd
+        // stay on top of the new one.
+        if let old = window.rootViewController, old.presentedViewController != nil {
+            old.dismiss(animated: false)
+        }
         guard animated, window.rootViewController != nil else {
             window.rootViewController = root
             return

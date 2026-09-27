@@ -89,6 +89,7 @@ final class QuestionPanel: UIView, UITextFieldDelegate {
         guard questions != items else { return }
         items = questions
         page = 0
+        submitted = false
         picks = [:]
         custom = [:]
         render()
@@ -168,8 +169,12 @@ final class QuestionPanel: UIView, UITextFieldDelegate {
         UIView.transition(with: card, duration: 0.2, options: [.transitionCrossDissolve, .allowUserInteraction]) { self.render() }
     }
 
+    /// Answers go once per question set (a quick double tap on the last
+    /// page would submit twice).
+    private var submitted = false
+
     private func advance() {
-        guard let q = current, answered(q) else { return }
+        guard !submitted, let q = current, answered(q) else { return }
         if page < items.count - 1 {
             go(1)
             return
@@ -179,6 +184,7 @@ final class QuestionPanel: UIView, UITextFieldDelegate {
             if let c = custom[q.id]?.trimmingCharacters(in: .whitespaces), !c.isEmpty { labels.append(c) }
             return (q.id, labels)
         }
+        submitted = true
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         onSubmit?(answers)
     }

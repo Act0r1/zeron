@@ -112,7 +112,9 @@ final class NewSessionViewController: UIViewController, UIGestureRecognizerDeleg
             guard let self, let p = self.project else { return [] }
             return await self.app.searchFiles(deviceId: p.device, spaceId: p.id, query: q)
         }
-        composer.onSend = { [weak self] text, images, _ in self?.create(text: text, images: images) }
+        composer.onSend = { [weak self] text, images, _ in
+            self?.create(text: text, images: images) ?? false ? .sent : .kept
+        }
         view.addSubview(composer)
         heroStack.leadingAnchor.constraint(greaterThanOrEqualTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 24).isActive = true
         // The headline lives in the free space above the composer — from the
@@ -322,17 +324,19 @@ final class NewSessionViewController: UIViewController, UIGestureRecognizerDeleg
         })
     }
 
-    private func create(text: String, images: [StagedImage]) {
+    /// False when the session couldn't be created (the prompt stays put).
+    private func create(text: String, images: [StagedImage]) -> Bool {
         app.lastDraft = draft
         guard let chatId = app.createSession(draft: draft, text: text, images: images) else {
             let alert = UIAlertController(title: "Couldn't start the session", message: "Choose a project or a host that can run it.", preferredStyle: .alert)
             alert.addAction(UIAlertAction(title: "OK", style: .default))
             present(alert, animated: true)
-            return
+            return false
         }
         // Lift the draft out (page + composer + typed text) so the chat can
         // take over in one motion.
         onCreated(chatId, DraftHandoff.capture(from: self, composer: composer, text: text))
+        return true
     }
 }
 

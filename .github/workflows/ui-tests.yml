@@ -61,6 +61,8 @@ jobs:
             const affectsIOS = path => path?.startsWith('apps/ios/')
               || mobileCore.some(prefix => path?.startsWith(prefix))
               || path === 'Cargo.lock'
+              || path === 'Cargo.toml'
+              || path === 'rust-toolchain.toml'
               || path === '.github/workflows/ui-tests.yml';
             return files.some(file => affectsIOS(file.filename)
               || affectsIOS(file.previous_filename));

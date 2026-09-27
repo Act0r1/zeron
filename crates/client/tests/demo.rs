@@ -206,8 +206,11 @@ fn send_streams_a_reply_and_adopts_the_echo() {
     assert!(Arc::ptr_eq(&after.entries[0].message, &first_message));
     let reply = after.transcript().last().unwrap();
     assert!(reply.message.parts.len() >= 4, "reasoning + text + tools");
+    // The row settles just after the transcript does.
+    wait_for("row idle", Duration::from_secs(5), || {
+        client.workspace().session("chat-home").unwrap().indicator == ChatIndicator::Idle
+    });
     let row = client.workspace().session("chat-home").unwrap().clone();
-    assert_eq!(row.indicator, ChatIndicator::Idle);
     assert_eq!(row.preview.as_deref(), Some("| Stage | Per token |"));
 }
 
@@ -244,10 +247,11 @@ fn questions_answer_through_respond_input() {
     wait_for("question", Duration::from_secs(10), || {
         session.composer().open_input.is_some()
     });
-    assert_eq!(
-        client.workspace().session("chat-deploy").unwrap().indicator,
-        ChatIndicator::AwaitingInput
-    );
+    // The host publishes the question, then flips the chat's status.
+    wait_for("awaiting input", Duration::from_secs(5), || {
+        client.workspace().session("chat-deploy").unwrap().indicator
+            == ChatIndicator::AwaitingInput
+    });
     let input = session.composer().open_input.clone().unwrap();
     session
         .respond_input(
@@ -459,10 +463,9 @@ fn idle_chat_send_completes_and_stops_working() {
                 && snap.transcript().last().unwrap().message.status == Some(MessageStatus::Complete)
         },
     );
-    assert_eq!(
-        client.workspace().session("chat-deploy").unwrap().indicator,
-        ChatIndicator::Idle
-    );
+    wait_for("row idle", Duration::from_secs(5), || {
+        client.workspace().session("chat-deploy").unwrap().indicator == ChatIndicator::Idle
+    });
 }
 
 #[test]

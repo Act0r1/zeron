@@ -33,6 +33,10 @@ final class SessionViewController: UIViewController, UIGestureRecognizerDelegate
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = Palette.background
+        // The app can be killed in the background: the draft goes to disk first.
+        backgroundObserver = NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.saveDraft()
+        }
         navigationItem.largeTitleDisplayMode = .never
         navigationItem.titleView = titleView
         navigationItem.rightBarButtonItem = UIBarButtonItem(image: UIImage(systemName: "ellipsis"), menu: sessionMenu())
@@ -61,19 +65,20 @@ final class SessionViewController: UIViewController, UIGestureRecognizerDelegate
             return AttachmentPicker.menu(host: self, limit: 8 - self.composer.images.count) { [weak self] in self?.composer.addImages($0) }
         }
         composer.onSend = { [weak self] text, images, mode in
-            guard let self else { return }
+            guard let self else { return .kept }
             if self.editingQueueId != nil {
                 self.endEdit(commit: text)
-                return
+                return .replaced
             }
             // An immediate send (new turn, steer, stop-and-send) gets the
             // desktop runway; a message queued behind a live turn keeps the
             // live turn's runway and just follows.
             let queued = self.shown.running && mode == .queue
-            self.source.send(text: text, images: images, mode: mode)
+            guard self.source.send(text: text, images: images, mode: mode) else { return .kept }
             // Sending puts the keyboard away (the composer rests as the capsule).
             DispatchQueue.main.async { self.composer.resignFirstResponder() }
             if queued { self.list.expectQueuedTurn() } else { self.list.beginOwnTurn() }
+            return .sent
         }
         composer.onStop = { [weak self] in self?.source.stop() }
         composer.text = Drafts.load(chatId)
@@ -151,6 +156,16 @@ final class SessionViewController: UIViewController, UIGestureRecognizerDelegate
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         setAccessory(visible: false)
+        // Coming back on screen (e.g. after a second copy of this chat was
+        // popped and detached it): live again.
+        if hasAppeared { source.reattach() }
+    }
+
+    private var hasAppeared = false
+    private var backgroundObserver: NSObjectProtocol?
+
+    deinit {
+        if let backgroundObserver { NotificationCenter.default.removeObserver(backgroundObserver) }
     }
 
     /// Swap the tab accessory *inside* the push/pop animation so it travels
@@ -193,13 +208,17 @@ final class SessionViewController: UIViewController, UIGestureRecognizerDelegate
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        hasAppeared = true
+        (splitViewController as? SplitRootController)?.sessionDidAppear(chatId)
         list.settleEdgeEffect()
         (tabBarController as? MainTabController)?.syncAccessory()
     }
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        Drafts.save(chatId, composer.text)
+        // Leaving mid-edit: give the queued row back and the draft its place.
+        if editingQueueId != nil { endEdit(commit: nil) }
+        saveDraft()
         if isMovingFromParent { setAccessory(visible: true) }
     }
 
@@ -277,17 +296,39 @@ final class SessionViewController: UIViewController, UIGestureRecognizerDelegate
 
     private var editingQueueId: String?
     private var stashedDraft = ""
+    private var stashedImages: [StagedImage] = []
+    /// The draft is parked in the stash (from the first edit until the last ends).
+    private var stashed = false
+
+    /// The user's own draft (never a queued message being edited).
+    private func saveDraft() {
+        Drafts.save(chatId, stashed ? stashedDraft : composer.text)
+    }
 
     private func beginEdit(_ id: String) {
+        // One edit at a time: hand the previous row back first (the draft
+        // stash stays the user's).
+        let switching = editingQueueId != nil
+        editingQueueId = nil
         Task { @MainActor in
+            if switching { await source.finishEdit(text: nil) }
             guard let text = await source.beginEdit(id) else {
                 let alert = UIAlertController(title: "Can't edit right now", message: "Another device is editing this message, or it was just sent.", preferredStyle: .alert)
                 alert.addAction(UIAlertAction(title: "OK", style: .default))
+                // A switch from another edit failed: the draft comes back.
+                restoreStash()
+                composer.placeholder = shown.placeholder
+                render(animated: true)
                 present(alert, animated: true)
                 return
             }
+            if !stashed {
+                stashedDraft = composer.text
+                stashedImages = composer.images
+                stashed = true
+            }
             editingQueueId = id
-            stashedDraft = composer.text
+            composer.images = []
             composer.text = text
             composer.placeholder = "Edit queued message"
             pill.banner = .editing
@@ -296,9 +337,17 @@ final class SessionViewController: UIViewController, UIGestureRecognizerDelegate
         }
     }
 
+    private func restoreStash() {
+        guard stashed else { return }
+        composer.text = stashedDraft
+        composer.images = stashedImages
+        stashedImages = []
+        stashed = false
+    }
+
     private func endEdit(commit text: String?) {
         editingQueueId = nil
-        composer.text = stashedDraft
+        restoreStash()
         composer.placeholder = shown.placeholder
         Task { await source.finishEdit(text: text) }
         render(animated: true)

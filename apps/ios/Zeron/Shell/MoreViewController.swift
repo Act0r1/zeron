@@ -82,9 +82,17 @@ final class MoreViewController: UIViewController, UICollectionViewDelegate {
         }
         reload()
         wallpaperObserver = NotificationCenter.default.addObserver(forName: WallpaperStore.didChange, object: nil, queue: .main) { [weak self] _ in self?.reload() }
+        // Devices go on/offline and the org name backfills after opening.
+        appToken = app.observe { [weak self] in self?.reload() }
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        if dataSource != nil { reload() }
     }
 
     private var wallpaperObserver: NSObjectProtocol?
+    private var appToken: AnyObject?
 
     private func reload() {
         var s = NSDiffableDataSourceSnapshot<String, Row>()
@@ -145,6 +153,7 @@ final class MoreViewController: UIViewController, UICollectionViewDelegate {
             let alert = UIAlertController(title: "Sign out?", message: "Local drafts stay on this device.", preferredStyle: .actionSheet)
             alert.addAction(UIAlertAction(title: "Sign Out", style: .destructive) { [weak self] _ in self?.app.signOut() })
             alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+            alert.popoverPresentationController?.sourceView = collectionView.cellForItem(at: path)
             present(alert, animated: true)
         default:
             break

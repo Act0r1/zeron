@@ -12,6 +12,11 @@ final class TranscriptListView: UIScrollView, RowViewDelegate, UIScrollViewDeleg
     private var visible: [UInt64: RowView] = [:]
     private var pool: [RowView] = []
     private var cache: [ModelKey: RowModel] = [:]
+    private var memoryObserver: NSObjectProtocol?
+
+    deinit {
+        if let memoryObserver { NotificationCenter.default.removeObserver(memoryObserver) }
+    }
     private var cacheOrder: [ModelKey] = []
     private var knownKeys = Set<UInt64>()
     private var inflight = Set<ModelKey>()
@@ -183,7 +188,7 @@ final class TranscriptListView: UIScrollView, RowViewDelegate, UIScrollViewDeleg
         panGestureRecognizer.addTarget(self, action: #selector(panned(_:)))
         delegate = self
         // Display models are a pure cache (rebuilt from the frame on demand).
-        NotificationCenter.default.addObserver(forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main) { [weak self] _ in
+        memoryObserver = NotificationCenter.default.addObserver(forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main) { [weak self] _ in
             self?.cache.removeAll()
             self?.cacheOrder.removeAll()
             self?.pool.forEach { $0.removeFromSuperview() }

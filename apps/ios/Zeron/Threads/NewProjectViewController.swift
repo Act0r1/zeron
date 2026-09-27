@@ -95,6 +95,10 @@ final class NewProjectViewController: UIViewController, UICollectionViewDelegate
         load(nil)
     }
 
+    private var loadGeneration = 0
+    /// The device `listing` came from.
+    private var listingDevice: String?
+
     private func load(_ path: String?) {
         guard let device else {
             status.text = "No desktop devices yet — open Zeron on a computer to add one."
@@ -103,13 +107,22 @@ final class NewProjectViewController: UIViewController, UICollectionViewDelegate
         }
         loading = true
         status.text = "Loading…"
+        // Until this device answers, nothing from the last one can be used.
+        useButton.isEnabled = false
+        loadGeneration += 1
+        let generation = loadGeneration
         Task { @MainActor in
             let listing = await app.listFolders(deviceId: device.id, path: path)
+            // A newer load (another device or folder) superseded this one.
+            guard generation == loadGeneration else { return }
             loading = false
             guard let listing else {
                 status.text = device.online ? "Couldn't read that folder." : "\(device.name) is offline."
+                // Keep browsing the last good folder only on the same device.
+                useButton.isEnabled = self.listing != nil && self.listingDevice == device.id
                 return
             }
+            self.listingDevice = device.id
             self.listing = listing
             self.path = listing.path
             var items: [String] = []
@@ -147,7 +160,8 @@ final class NewProjectViewController: UIViewController, UICollectionViewDelegate
     }
 
     private func create() {
-        guard let device, let path else { return }
+        // The path must be one this device listed.
+        guard let device, let path, listingDevice == device.id else { return }
         let git = listing?.entries.contains { $0.name == ".git" } ?? false
         useButton.configuration?.showsActivityIndicator = true
         Task { @MainActor in
