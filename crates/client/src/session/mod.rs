@@ -270,6 +270,12 @@ impl SessionCore {
         lock(&self.room).clone()
     }
 
+    /// Drop the room (deleted chat): its tasks stop and it flushes once.
+    pub(crate) fn close_room(&self) {
+        let room = lock(&self.room).take();
+        drop(room);
+    }
+
     /// Live: join the chat's chat2 room once its row says it's dialable
     /// (roomGen ≥ 2). Idempotent.
     pub(crate) fn ensure_room(self: &Arc<Self>, client: &Arc<ClientInner>) {
@@ -328,6 +334,7 @@ impl SessionCore {
                 store: live.store.clone(),
                 on_applied,
                 on_status,
+                cancel: client.cancel.clone(),
             },
         );
         let mut slot = lock(&self.room);

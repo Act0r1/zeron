@@ -285,6 +285,9 @@ pub fn layout_fixture_markdown() -> String {
     FIXTURE.to_owned()
 }
 
+/// Width-cache size past which the layout worker starts a fresh one.
+const WIDTH_CACHE_BUDGET: usize = 4 << 20;
+
 pub(crate) const FIXTURE: &str = include_str!("fixture.md");
 
 /// Rust's line breaks for `text` in one face/size at `width`, as UTF-16
@@ -524,8 +527,12 @@ impl Worker {
                     Msg::Viewport { width, scale } => {
                         if (scale - self.typo.scale).abs() > f32::EPSILON {
                             self.typo.scale = scale;
-                            // New sizes: every prepared paragraph is stale.
-                            self.builder = RowBuilder::default();
+                            // New sizes: every prepared paragraph is stale —
+                            // but what the user opened or folded stays so.
+                            let old = std::mem::take(&mut self.builder);
+                            self.builder.expanded = old.expanded;
+                            self.builder.collapsed = old.collapsed;
+                            self.builder.detail_open = old.detail_open;
                             self.heights.clear();
                             self.cache = WidthCache::new();
                         }
@@ -553,6 +560,13 @@ impl Worker {
             }
             if dirty && self.width > 0.0 && self.typo.has_faces() {
                 self.pass();
+                // The width cache never evicts, and a streaming block that
+                // falls back to the platform (CJK, emoji) or can't break (a
+                // long hash) adds a whole-prefix entry per update. Past the
+                // budget, start over: re-measuring is cheap next to the growth.
+                if self.cache.stats().bytes > WIDTH_CACHE_BUDGET {
+                    self.cache = WidthCache::new();
+                }
             }
         }
     }

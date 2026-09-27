@@ -51,13 +51,18 @@ fn percent_decode(value: &str) -> String {
     let mut i = 0;
     while i < bytes.len() {
         match bytes[i] {
-            b'%' if i + 2 < bytes.len() => match u8::from_str_radix(&value[i + 1..i + 3], 16) {
-                Ok(b) => {
+            // Bytes, not `&str` slicing: `%` before a multi-byte char would
+            // split it (and panic).
+            b'%' if i + 3 <= bytes.len() => match std::str::from_utf8(&bytes[i + 1..i + 3])
+                .ok()
+                .and_then(|hex| u8::from_str_radix(hex, 16).ok())
+            {
+                Some(b) => {
                     out.push(b);
                     i += 3;
                     continue;
                 }
-                Err(_) => out.push(b'%'),
+                None => out.push(b'%'),
             },
             b'+' => out.push(b' '),
             b => out.push(b),
@@ -292,8 +297,8 @@ enum Mode {
     WorkOs {
         edge_url: String,
         org_id: String,
-        tokens: Mutex<AuthTokens>,
-        refresh_gate: tokio::sync::Mutex<()>,
+        tokens: Arc<Mutex<AuthTokens>>,
+        refresh_gate: Arc<tokio::sync::Mutex<()>>,
     },
 }
 
@@ -302,7 +307,7 @@ enum Mode {
 pub(crate) struct TokenProvider {
     mode: Mode,
     events: Arc<EventPump>,
-    expired: AtomicBool,
+    expired: Arc<AtomicBool>,
 }
 
 impl TokenProvider {
@@ -324,14 +329,14 @@ impl TokenProvider {
             Credentials::WorkOs { org_id, tokens, .. } => Mode::WorkOs {
                 edge_url: edge_url.to_owned(),
                 org_id: org_id.clone(),
-                tokens: Mutex::new(tokens.clone()),
-                refresh_gate: tokio::sync::Mutex::new(()),
+                tokens: Arc::new(Mutex::new(tokens.clone())),
+                refresh_gate: Arc::new(tokio::sync::Mutex::new(())),
             },
         };
         Self {
             mode,
             events,
-            expired: AtomicBool::new(false),
+            expired: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -366,33 +371,63 @@ impl TokenProvider {
                 if self.expired.load(Ordering::Acquire) {
                     return Err(ClientError::Auth("session expired".into()));
                 }
-                let _gate = refresh_gate.lock().await;
-                // Joined an in-flight refresh: it already rotated the pair.
-                let current = lock(tokens).clone();
-                if !jwt_expired(&current.access_token, chrono::Utc::now().timestamp()) {
-                    return Ok(current.access_token);
-                }
-                match refresh(edge_url, &current.refresh_token, Some(org_id)).await {
-                    Ok(next) => {
-                        *lock(tokens) = next.clone();
-                        self.events
-                            .ordered(ClientEvent::AuthRefreshed(next.clone()));
-                        Ok(next.access_token)
-                    }
-                    Err(ClientError::Auth(reason)) => {
-                        if !self.expired.swap(true, Ordering::AcqRel) {
-                            self.events.ordered(ClientEvent::AuthExpired {
-                                reason: reason.clone(),
-                            });
-                        }
-                        Err(ClientError::Auth(reason))
-                    }
-                    Err(err) => {
-                        tracing::warn!(error = %err, "token refresh failed; using the stale access token");
-                        Ok(current.access_token)
-                    }
+                // The refresh runs as its own task that stores the rotated
+                // pair itself: callers wrap this in timeouts, and dropping a
+                // refresh mid-flight (after the server rotated the refresh
+                // token) would strand us on a spent one — then sign-out.
+                let task = refresh_task(
+                    edge_url.clone(),
+                    org_id.clone(),
+                    tokens.clone(),
+                    refresh_gate.clone(),
+                    self.events.clone(),
+                    self.expired.clone(),
+                );
+                match crate::runtime::shared().spawn(task).await {
+                    Ok(result) => result,
+                    Err(err) => Err(ClientError::Auth(format!("token refresh aborted: {err}"))),
                 }
             }
+        }
+    }
+}
+
+/// Single-flight refresh (the gate is held for the whole exchange) that
+/// persists its own result.
+async fn refresh_task(
+    edge_url: String,
+    org_id: String,
+    tokens: Arc<Mutex<AuthTokens>>,
+    gate: Arc<tokio::sync::Mutex<()>>,
+    events: Arc<EventPump>,
+    expired: Arc<AtomicBool>,
+) -> Result<String> {
+    let _gate = gate.lock_owned().await;
+    // Joined an in-flight refresh: it already rotated the pair.
+    let current = lock(&tokens).clone();
+    if !jwt_expired(&current.access_token, chrono::Utc::now().timestamp()) {
+        return Ok(current.access_token);
+    }
+    if expired.load(Ordering::Acquire) {
+        return Err(ClientError::Auth("session expired".into()));
+    }
+    match refresh(&edge_url, &current.refresh_token, Some(&org_id)).await {
+        Ok(next) => {
+            *lock(&tokens) = next.clone();
+            events.ordered(ClientEvent::AuthRefreshed(next.clone()));
+            Ok(next.access_token)
+        }
+        Err(ClientError::Auth(reason)) => {
+            if !expired.swap(true, Ordering::AcqRel) {
+                events.ordered(ClientEvent::AuthExpired {
+                    reason: reason.clone(),
+                });
+            }
+            Err(ClientError::Auth(reason))
+        }
+        Err(err) => {
+            tracing::warn!(error = %err, "token refresh failed; using the stale access token");
+            Ok(current.access_token)
         }
     }
 }
@@ -400,6 +435,14 @@ impl TokenProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn percent_decode_handles_edges() {
+        assert_eq!(percent_decode("a%20b"), "a b");
+        assert_eq!(percent_decode("end%41"), "endA");
+        assert_eq!(percent_decode("%aé"), "%aé");
+        assert_eq!(percent_decode("%"), "%");
+    }
 
     #[test]
     fn authorize_url_and_callback_round_trip() {

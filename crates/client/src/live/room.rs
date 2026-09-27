@@ -498,6 +498,9 @@ pub(crate) struct RoomDeps {
     pub on_applied: Arc<dyn Fn() + Send + Sync>,
     /// Connection posture changed (connectivity recompute).
     pub on_status: Arc<dyn Fn() + Send + Sync>,
+    /// The client's lifetime: sign-out stops the room even while a view
+    /// still holds its session.
+    pub cancel: CancellationToken,
 }
 
 impl Room {
@@ -510,7 +513,7 @@ impl Room {
         deps: RoomDeps,
     ) -> Arc<Self> {
         let persister = Persister::new(doc, deps.store.clone(), chat_id, cursor);
-        let cancel = CancellationToken::new();
+        let cancel = deps.cancel.child_token();
         persister.start(cancel.clone());
         let slot = Arc::new(Mutex::new(Slot::default()));
 

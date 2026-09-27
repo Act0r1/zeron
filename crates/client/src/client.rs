@@ -801,6 +801,11 @@ impl Client {
     pub fn delete_session(&self, chat_id: &str) -> Result<()> {
         self.chat_write(chat_id, |doc| doc.delete_chat(chat_id))?;
         let core = lock(&self.inner.sessions).remove(chat_id);
+        // A view may still hold the session: close its room now (it flushes
+        // once), so nothing re-saves the snapshot deleted below.
+        if let Some(core) = &core {
+            core.close_room();
+        }
         drop(core);
         if let Some(live) = self.inner.live()
             && let Err(err) = live.store.delete_snapshot(chat_id)

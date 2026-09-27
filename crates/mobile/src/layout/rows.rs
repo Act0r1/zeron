@@ -440,10 +440,13 @@ impl RowBuilder {
         let tree = if streaming { state.parser.display_tree() } else { state.parser.tree().clone() };
         let mut next = Vec::with_capacity(tree.blocks.len());
         for (bi, block) in tree.blocks.iter().enumerate() {
+            let copy = text.get(block.range.clone()).unwrap_or("").trim_end();
+            // Same rendering isn't enough: the source can still differ (a
+            // closing `**` that renders identically) and Copy reads the source.
             let reuse = state
                 .blocks
                 .get(bi)
-                .filter(|(b, _)| Arc::ptr_eq(b, block) || b.block == block.block)
+                .filter(|(b, core)| (Arc::ptr_eq(b, block) || b.block == block.block) && core.copy_text == copy)
                 .map(|(_, core)| core.clone());
             let core = reuse.unwrap_or_else(|| {
                 let id = format!("{pkey}.{bi}");
@@ -454,7 +457,7 @@ impl RowBuilder {
                     kind: RowKind::Markdown,
                     entry_id: Arc::from(pkey.split('#').next().unwrap_or("")),
                     content: Content::Block(content),
-                    copy_text: text.get(block.range.clone()).unwrap_or("").trim_end().to_owned(),
+                    copy_text: copy.to_owned(),
                 })
             });
             next.push((block.clone(), core));
