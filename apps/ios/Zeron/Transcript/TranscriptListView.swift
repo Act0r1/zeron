@@ -406,6 +406,19 @@ final class TranscriptListView: UIScrollView, RowViewDelegate, UIScrollViewDeleg
         contentOffset.y += delta * CGFloat(1 - exp(-dt * 16))
     }
 
+    /// The first user message bubble currently laid out (handoff target).
+    func firstUserBubble(in target: UIView) -> CGRect? {
+        let rows = visible.values.filter { $0.kind == .user && !$0.isHidden }.sorted { $0.frame.minY < $1.frame.minY }
+        for row in rows {
+            guard let d = row.model?.display,
+                  let box = d.boxes.first(where: { $0.color == .userBubble && $0.scroller == nil })
+            else { continue }
+            let r = CGRect(x: CGFloat(box.x), y: CGFloat(box.y), width: CGFloat(box.w), height: CGFloat(box.h))
+            return row.convert(r, to: target)
+        }
+        return nil
+    }
+
     // MARK: Interaction
 
     @objc private func tapped(_ tap: UITapGestureRecognizer) {

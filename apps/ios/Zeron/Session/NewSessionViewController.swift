@@ -43,7 +43,7 @@ struct ModelChoice: Equatable {
 /// focused immediately so the common case is: tap, type, send.
 final class NewSessionViewController: UIViewController, UIGestureRecognizerDelegate {
     private let app: AppModel
-    private let onCreated: (String) -> Void
+    private let onCreated: (String, DraftHandoff?) -> Void
     private let composer = ComposerBar()
     private let hero = UILabel()
     private let wallpaper = WallpaperView()
@@ -54,7 +54,7 @@ final class NewSessionViewController: UIViewController, UIGestureRecognizerDeleg
     /// Embedded in the iPad split's main column (no sheet chrome).
     private let embedded: Bool
 
-    init(app: AppModel, prompt: String?, embedded: Bool = false, onCreated: @escaping (String) -> Void) {
+    init(app: AppModel, prompt: String?, embedded: Bool = false, onCreated: @escaping (String, DraftHandoff?) -> Void) {
         self.app = app
         self.embedded = embedded
         self.onCreated = onCreated
@@ -318,7 +318,9 @@ final class NewSessionViewController: UIViewController, UIGestureRecognizerDeleg
             present(alert, animated: true)
             return
         }
-        onCreated(chatId)
+        // Lift the draft out (page + composer + typed text) so the chat can
+        // take over in one motion.
+        onCreated(chatId, DraftHandoff.capture(from: self, composer: composer, text: text))
     }
 }
 

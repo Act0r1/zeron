@@ -93,9 +93,9 @@ final class MainTabController: UITabBarController, UITabBarControllerDelegate, A
     }
 
     func presentNewSession(prompt: String? = nil) {
-        let vc = NewSessionViewController(app: app, prompt: prompt) { [weak self] chatId in
+        let vc = NewSessionViewController(app: app, prompt: prompt) { [weak self] chatId, handoff in
             guard let self else { return }
-            self.openSession(chatId)
+            self.openSession(chatId, handoff: handoff)
         }
         let nav = UINavigationController(rootViewController: vc)
         nav.modalPresentationStyle = .pageSheet
@@ -112,6 +112,39 @@ final class MainTabController: UITabBarController, UITabBarControllerDelegate, A
 
     func showSearch() {
         selectedTab = tabs.first { $0 is UISearchTab }
+    }
+
+    /// From the new-session sheet: the chat goes in under the sheet at once,
+    /// the sheet leaves without its slide, and the handoff animation carries
+    /// the draft (page, composer, message) into the chat.
+    func openSession(_ chatId: String, handoff: DraftHandoff?) {
+        guard let handoff, let window = view.window,
+              let tab = tabs.first(where: { $0.identifier == "sessions" })
+        else { return openSession(chatId) }
+        selectedTab = tab
+        guard let nav = tab.viewController as? UINavigationController else { return openSession(chatId) }
+        let session = SessionViewController(app: app, chatId: chatId)
+        UIView.performWithoutAnimation {
+            nav.popToRootViewController(animated: false)
+            nav.pushViewController(session, animated: false)
+            setAccessoryVisible(false, animated: false)
+            view.layoutIfNeeded()
+            // Focus moves to the chat's composer *before* the sheet goes, so the
+            // keyboard is handed over instead of dropping and popping back.
+            session.prepareArrival()
+            // Hide the sheet now; tear it down only once the motion is done.
+            // Dismissal (plus the keyboard re-hosting with it) is a heavy
+            // compositor frame — mid-animation it swallowed the motion.
+            if let sheet = presentedViewController?.presentationController as? UISheetPresentationController {
+                // Drop the sheet's background dimming with it (it would sit over
+                // the chat until the deferred dismissal, then snap off).
+                sheet.largestUndimmedDetentIdentifier = .large
+            }
+            presentedViewController?.presentationController?.containerView?.alpha = 0
+        }
+        DraftHandoffAnimator.run(handoff, into: session, window: window) { [weak self] in
+            if self?.presentedViewController != nil { self?.dismiss(animated: false) }
+        }
     }
 
     /// Push a session on the Sessions tab (from new-session, deep links, search).

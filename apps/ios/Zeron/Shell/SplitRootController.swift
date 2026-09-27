@@ -83,8 +83,22 @@ final class SplitRootController: UISplitViewController, UISplitViewControllerDel
         guard !isCollapsed else { return tabs.presentNewSession(prompt: prompt) }
         currentChatId = nil
         sidebar.currentChatId = nil
-        let draft = NewSessionViewController(app: app, prompt: prompt, embedded: true) { [weak self] chatId in
-            self?.openSession(chatId)
+        let draft = NewSessionViewController(app: app, prompt: prompt, embedded: true) { [weak self] chatId, handoff in
+            guard let self, let handoff, let window = self.view.window, !self.isCollapsed else {
+                self?.openSession(chatId)
+                return
+            }
+            // In place: the chat replaces the draft in the column and the
+            // handoff carries the composer and message across.
+            self.currentChatId = chatId
+            self.sidebar.currentChatId = chatId
+            let session = SessionViewController(app: self.app, chatId: chatId)
+            UIView.performWithoutAnimation {
+                self.detail.setViewControllers([session], animated: false)
+                self.view.layoutIfNeeded()
+                session.prepareArrival()
+            }
+            DraftHandoffAnimator.run(handoff, into: session, window: window)
         }
         detail.setViewControllers([draft], animated: false)
     }

@@ -131,7 +131,13 @@ final class SessionFlowTests: XCTestCase {
         snapshot(app, "new-session")
         input.typeText("Add a dark mode toggle to settings")
         app.buttons["composer-send"].tap()
-        XCTAssertTrue(app.scrollViews["transcript"].waitForExistence(timeout: 10), "pushes the new session")
+        XCTAssertTrue(app.scrollViews["transcript"].waitForExistence(timeout: 10), "hands off into the new session")
+        // The handoff keeps the keyboard up (focus moves to the chat's composer)
+        // and ends with the sheet gone and the message in the transcript.
+        XCTAssertTrue(app.keyboards.firstMatch.exists, "keyboard handed over, not dropped")
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'You: Add a dark mode toggle'")).firstMatch.waitForExistence(timeout: 5))
+        sleep(1)
+        XCTAssertFalse(app.buttons["Close"].exists, "sheet dismissed after the motion")
         snapshot(app, "new-session-created")
     }
 

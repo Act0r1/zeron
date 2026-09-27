@@ -208,6 +208,34 @@ final class SessionViewController: UIViewController, UIGestureRecognizerDelegate
         }
     }
 
+    // MARK: Arrival from the new-session draft (DraftHandoffAnimator)
+
+    /// Content hidden, composer focused so the keyboard never drops.
+    func prepareArrival() {
+        loadViewIfNeeded()
+        list.alpha = 0
+        bottom.alpha = 0
+        composer.becomeFirstResponder()
+        view.layoutIfNeeded()
+    }
+
+    func arrivalComposerFrame(in window: UIWindow) -> CGRect? {
+        view.layoutIfNeeded()
+        return composer.convert(composer.bounds, to: window)
+    }
+
+    func arrivalBubbleFrame(in window: UIWindow) -> CGRect? {
+        list.layoutIfNeeded()
+        return list.firstUserBubble(in: window)
+    }
+
+    func revealArrivalComposer() { bottom.alpha = 1 }
+    func revealArrivalTranscript() { list.alpha = 1 }
+    func finishArrival() {
+        list.alpha = 1
+        bottom.alpha = 1
+    }
+
     /// Beside the iPad sidebar the header is t3's: leading breadcrumb
     /// ("project / title") instead of a centered two-line title.
     private func applyHeaderStyle() {
