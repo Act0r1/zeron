@@ -401,4 +401,22 @@ final class SessionFlowTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Choose Wallpaper…"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["Effect"].exists)
     }
+
+    /// The new-session headline stays above the composer, keyboard up, with
+    /// a project whose name wraps it onto two lines.
+    func testNewSessionHeadlineStaysAboveComposer() {
+        let app = launch(["-route", "new"])
+        let chip = app.buttons["composer-chip-project"]
+        XCTAssertTrue(chip.waitForExistence(timeout: 10))
+        chip.tap()
+        app.buttons["Zeron iOS"].firstMatch.tap()
+        let hero = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'What should we build in'")).firstMatch
+        XCTAssertTrue(hero.waitForExistence(timeout: 5))
+        app.textViews["composer-input"].tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        sleep(1)
+        let composer = app.textViews["composer-input"]
+        XCTAssertLessThan(hero.frame.maxY, composer.frame.minY - 8, "headline clear of the composer")
+        snapshot(app, "new-session-headline")
+    }
 }

@@ -130,15 +130,22 @@ final class NewSessionViewController: UIViewController, UIGestureRecognizerDeleg
                 heroStack.bottomAnchor.constraint(equalTo: composer.topAnchor, constant: -32),
             ])
         } else {
-            // Centered in the free space, but never under the composer when the
-            // keyboard lifts it.
-            let centered = heroStack.centerYAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerYAnchor, constant: -60)
-            centered.priority = .defaultHigh
+            // The headline lives in the free space above the composer — from
+            // the top of the sheet to the composer's top edge — centered there,
+            // so it's always above the composer (keyboard up or down, one line
+            // or two).
+            let free = UILayoutGuide()
+            view.addLayoutGuide(free)
+            heroStack.setContentCompressionResistancePriority(.required, for: .vertical)
             NSLayoutConstraint.activate([
+                free.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+                free.bottomAnchor.constraint(equalTo: composer.topAnchor, constant: -20),
+                free.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                free.trailingAnchor.constraint(equalTo: view.trailingAnchor),
                 heroStack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-                centered,
-                heroStack.bottomAnchor.constraint(lessThanOrEqualTo: composer.topAnchor, constant: -28),
-                heroStack.topAnchor.constraint(greaterThanOrEqualTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
+                heroStack.centerYAnchor.constraint(equalTo: free.centerYAnchor),
+                heroStack.topAnchor.constraint(greaterThanOrEqualTo: free.topAnchor),
+                heroStack.bottomAnchor.constraint(lessThanOrEqualTo: free.bottomAnchor),
                 composer.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 12),
                 composer.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -12),
                 composer.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor, constant: -8),
