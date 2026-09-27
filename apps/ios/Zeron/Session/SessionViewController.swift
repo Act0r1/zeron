@@ -59,22 +59,11 @@ final class SessionViewController: UIViewController, UIGestureRecognizerDelegate
         setContentScrollView(list, for: .top)
         list.topEdgeEffect.style = .soft
         list.bottomEdgeEffect.isHidden = true
-        // The system edge effect (the soft blur under the bar) doesn't render
-        // while a push is running: opening a session showed the transcript
-        // under the title, crisp, for the whole transition, then the effect
-        // snapped in. A plain fade covers the transition and dissolves into
-        // the system effect once it's on (viewDidAppear).
-        // Solid behind the bar (nothing reads through the title), easing
-        // out just below it.
-        topFade.fadeLength = 40
-        topFade.translatesAutoresizingMaskIntoConstraints = false
-        view.insertSubview(topFade, aboveSubview: list)
-        NSLayoutConstraint.activate([
-            topFade.topAnchor.constraint(equalTo: view.topAnchor),
-            topFade.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            topFade.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            topFade.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 32),
-        ])
+        revealBlur.frame = view.bounds
+        revealBlur.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        revealBlur.isUserInteractionEnabled = false
+        revealBlur.isHidden = true
+        view.insertSubview(revealBlur, aboveSubview: list)
 
         composer.attachMenu = { [weak self] in
             guard let self else { return UIMenu() }
@@ -222,20 +211,45 @@ final class SessionViewController: UIViewController, UIGestureRecognizerDelegate
         })
     }
 
+    // MARK: Reveal on open
+
+    /// Blurs the transcript as it fades in after a push.
+    private let revealBlur = UIVisualEffectView(effect: nil)
+    private var revealPending = false
+
+    /// The soft edge effect under the bar doesn't render while a push runs:
+    /// a transcript on screen during it read crisp under the title, then the
+    /// effect snapped in. So a pushed session slides in with the transcript
+    /// held back, and it fades and un-blurs in once the effect is on
+    /// (viewDidAppear) — the way other chat apps open a thread.
+    override func viewIsAppearing(_ animated: Bool) {
+        super.viewIsAppearing(animated)
+        // First appearance, by an animated push (the new-session handoff and
+        // unanimated column swaps reveal their own way).
+        guard animated, !hasAppeared, transitionCoordinator != nil, !UIAccessibility.isReduceMotionEnabled else { return }
+        revealPending = true
+        list.alpha = 0
+        revealBlur.effect = UIBlurEffect(style: .regular)
+        revealBlur.isHidden = false
+    }
+
+    private func revealTranscript() {
+        guard revealPending else { return }
+        revealPending = false
+        UIView.animate(withDuration: 0.25, delay: 0, options: [.curveEaseOut, .allowUserInteraction]) {
+            self.list.alpha = 1
+            self.revealBlur.effect = nil
+        } completion: { _ in
+            self.revealBlur.isHidden = true
+        }
+    }
+
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         hasAppeared = true
         (splitViewController as? SplitRootController)?.sessionDidAppear(chatId)
-        // The system edge effect is on now (it doesn't render mid-push):
-        // hand over from the transition's fade.
         list.settleEdgeEffect()
-        if !topFade.isHidden {
-            UIView.animate(withDuration: 0.2, delay: 0, options: [.curveEaseOut, .allowUserInteraction]) {
-                self.topFade.alpha = 0
-            } completion: { _ in
-                self.topFade.isHidden = true
-            }
-        }
+        revealTranscript()
         (tabBarController as? MainTabController)?.syncAccessory()
     }
 
@@ -305,7 +319,6 @@ final class SessionViewController: UIViewController, UIGestureRecognizerDelegate
     }
 
     private let bottomFade = EdgeFadeOverlay()
-    private let topFade = EdgeFadeOverlay(edge: .top)
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
