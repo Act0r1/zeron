@@ -41,6 +41,27 @@ pub enum ColorRole {
     SyntaxTag,
     SyntaxAttribute,
     SyntaxEscape,
+    // Tool groups (desktop transcript tokens).
+    /// `text_faint`: detail bodies.
+    TextFaint,
+    /// `text` @ 0.85: file badge names, agent card details.
+    TextSoft,
+    /// `hairline(0.12)`: the activity rail.
+    ToolRail,
+    /// `ink(0.06)`: file badge fill.
+    ToolBadge,
+    /// File-icon well inside a badge.
+    ToolWell,
+    /// `ink(0.03)` / `hairline(0.07)` / `ink(0.08)`: subagent cards and tiles.
+    AgentCard,
+    AgentCardBorder,
+    AgentTile,
+    /// Diff rows: wash (0.055), accent bar (0.55), hunk header.
+    DiffAddWash,
+    DiffDelWash,
+    DiffAddBar,
+    DiffDelBar,
+    DiffHunk,
 }
 
 /// Text decorations, painted relative to the run's baseline.
@@ -158,6 +179,20 @@ pub enum WidgetKind {
     Detail { title: String },
     /// A small SF-symbol-like icon by name.
     Icon { name: String, color: ColorRole },
+    /// A tool group's disclosure chevron (rotates between states).
+    Chevron { expanded: bool },
+    /// The activity rail of an expanded tool group, in the widget's
+    /// coordinates: a 1pt trunk at `trunk_x` from each row's top down to a
+    /// quadratic elbow (radius `bend`) at `row_mid` below the row top, then a
+    /// branch to `branch_end`. The trunk continues through a row's full
+    /// height (open details) into the next row.
+    ToolRail { trunk_x: f32, bend: f32, branch_end: f32, row_mid: f32, tops: Vec<f32>, heights: Vec<f32> },
+    /// Tap target toggling one tool row's inline detail.
+    ToolToggle { detail: u64, open: bool },
+    /// Shimmer sweep over the active group's title (text drawn by the canvas
+    /// underneath; the painter re-draws those runs brighter through a moving
+    /// gradient).
+    Shimmer,
 }
 
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]

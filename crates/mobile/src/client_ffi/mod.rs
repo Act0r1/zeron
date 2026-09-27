@@ -579,10 +579,10 @@ pub fn relative_time_label(at_ms: i64, now_ms: i64) -> String {
     zc::relative_time_label(at_ms, now_ms)
 }
 
-/// Stable palette slot for a project id.
+/// Stable palette slot for a project path (`"home"` without a project).
 #[uniffi::export]
-pub fn project_color_index(space_id: String) -> u32 {
-    zc::project_color_index(&space_id)
+pub fn project_color_index(space_path: String) -> u32 {
+    zc::project_color_index(&space_path)
 }
 
 /// Size of the project palette `project_color_index` indexes.

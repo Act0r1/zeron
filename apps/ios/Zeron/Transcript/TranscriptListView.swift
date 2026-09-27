@@ -26,6 +26,12 @@ final class TranscriptListView: UIScrollView, RowViewDelegate, UIScrollViewDeleg
     var onDistanceFromBottom: ((CGFloat) -> Void)?
     var imageLoader: ((String, UIImageView) -> Void)?
 
+    /// A disclosure the user just toggled: its next height change tweens with
+    /// the desktop fold (140 ms ease-out).
+    private var pendingFold: UInt64?
+    /// Row frames animate during this apply (fold / tool-row arrival).
+    private var frameAnimation: UIViewPropertyAnimator?
+
     private var spring: CADisplayLink?
     private var lastSpringTick: CFTimeInterval = 0
     private var viewportWidth: CGFloat = 0
@@ -166,7 +172,13 @@ final class TranscriptListView: UIScrollView, RowViewDelegate, UIScrollViewDeleg
                 anchor = (p.key, contentOffset.y - CGFloat(p.y))
             }
         }
+        let old = current
         current = frame
+        if old == nil || old?.rowCount() == 0 {
+            // Groups present when the transcript attaches never animate.
+            ToolRailView.quietUntil = CACurrentMediaTime() + 0.8
+        }
+        let animation = rowAnimation(old: old, new: frame)
         let height = CGFloat(frame.totalHeight())
         if contentSize.height != height || contentSize.width != bounds.width {
             contentSize = CGSize(width: bounds.width, height: height)
@@ -183,11 +195,29 @@ final class TranscriptListView: UIScrollView, RowViewDelegate, UIScrollViewDeleg
                 bounds.origin.y = target
             }
         }
-        layoutRows()
+        layoutRows(animation: animation)
     }
 
-    private func layoutRows() {
+    /// Fold toggles tween 140 ms ease-out; a visible tool group that grew
+    /// (a new call arrived) reveals over 360 ms expo — desktop timings.
+    private func rowAnimation(old: LayoutFrame?, new: LayoutFrame) -> UIViewPropertyAnimator? {
+        guard let old, !UIAccessibility.isReduceMotionEnabled else { return nil }
+        func height(_ f: LayoutFrame, _ key: UInt64) -> Float? {
+            f.indexOf(key: key).flatMap { f.placement(index: $0)?.height }
+        }
+        if let key = pendingFold, let a = height(old, key), let b = height(new, key), a != b {
+            pendingFold = nil
+            return UIViewPropertyAnimator(duration: Motion.fold, curve: .easeOut)
+        }
+        let grew = visible.contains { key, view in
+            view.kind == .tools && (height(new, key) ?? 0) > (height(old, key) ?? .greatestFiniteMagnitude)
+        }
+        return grew ? UIViewPropertyAnimator(duration: Motion.rowReveal, timingParameters: Motion.expo) : nil
+    }
+
+    private func layoutRows(animation: UIViewPropertyAnimator? = nil) {
         guard let frame = current else { return }
+        var moves: [(RowView, CGRect)] = []
         let state = Signposts.transcript.beginInterval("layout-rows")
         let t0 = CACurrentMediaTime()
         defer {
@@ -226,7 +256,14 @@ final class TranscriptListView: UIScrollView, RowViewDelegate, UIScrollViewDeleg
                 }
             }
             let rect = CGRect(x: 0, y: CGFloat(p.y), width: bounds.width, height: CGFloat(p.height))
-            if view.frame != rect { view.frame = rect }
+            if view.frame != rect {
+                // Existing rows tween with the animation; new ones just land.
+                if animation != nil, !view.frame.isEmpty, !stale || view.key == p.key {
+                    moves.append((view, rect))
+                } else {
+                    view.frame = rect
+                }
+            }
         }
         for (key, view) in visible where !seen.contains(key) {
             visible[key] = nil
@@ -234,6 +271,14 @@ final class TranscriptListView: UIScrollView, RowViewDelegate, UIScrollViewDeleg
             view.layer.removeAllAnimations()
             view.alpha = 1
             pool.append(view)
+        }
+        if let animation, !moves.isEmpty {
+            for (view, _) in moves where view.kind == .tools { view.clipsToBounds = true }
+            animation.addAnimations { for (view, rect) in moves { view.frame = rect } }
+            animation.addCompletion { _ in for (view, _) in moves { view.clipsToBounds = false } }
+            animation.startAnimation()
+        } else {
+            for (view, rect) in moves { view.frame = rect }
         }
         prefetch(frame: frame, around: y0...y1)
     }
@@ -363,7 +408,13 @@ final class TranscriptListView: UIScrollView, RowViewDelegate, UIScrollViewDeleg
 
     func rowView(_ view: RowView, toggle key: UInt64) {
         UISelectionFeedbackGenerator().selectionChanged()
+        pendingFold = key
         engine.toggle(key: key)
+    }
+
+    func rowView(_ view: RowView, toggleDetail detail: UInt64, open: Bool) {
+        pendingFold = view.key
+        engine.toggleDetail(row: view.key, detail: detail, open: open)
     }
 
     func rowView(_ view: RowView, open url: URL) {

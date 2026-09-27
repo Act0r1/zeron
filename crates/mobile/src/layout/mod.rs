@@ -10,8 +10,10 @@
 
 pub mod display;
 mod markdown;
+mod file_icons;
 mod rows;
 mod style;
+mod tools;
 
 use std::collections::HashMap;
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -325,6 +327,7 @@ enum Msg {
     Input(TranscriptInput),
     Viewport { width: f32, scale: f32 },
     Toggle(u64),
+    ToggleDetail { row: u64, detail: u64, open: bool },
     Shutdown,
 }
 
@@ -399,6 +402,11 @@ impl TranscriptView {
     /// Expand/collapse a disclosure (tool group, long user message).
     pub fn toggle(&self, key: u64) {
         self.send(Msg::Toggle(key));
+    }
+
+    /// Flip one tool row's inline detail (`open` = its state as painted).
+    pub fn toggle_detail(&self, row: u64, detail: u64, open: bool) {
+        self.send(Msg::ToggleDetail { row, detail, open });
     }
 
     /// The latest published frame.
@@ -522,6 +530,11 @@ impl Worker {
                             self.cache = WidthCache::new();
                         }
                         self.width = width;
+                        dirty = true;
+                    }
+                    Msg::ToggleDetail { row, detail, open } => {
+                        self.builder.detail_open.insert(detail, !open);
+                        self.builder.invalidate(row);
                         dirty = true;
                     }
                     Msg::Toggle(key) => {

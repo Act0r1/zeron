@@ -29,5 +29,6 @@ zeron-proto.workspace = true
 zeron-client.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+similar.workspace = true
 zeron-syntax.workspace = true
 thiserror.workspace = true

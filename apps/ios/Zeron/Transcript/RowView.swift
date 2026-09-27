@@ -33,6 +33,7 @@ final class RowCanvas: UIView {
 
 protocol RowViewDelegate: AnyObject {
     func rowView(_ view: RowView, toggle key: UInt64)
+    func rowView(_ view: RowView, toggleDetail detail: UInt64, open: Bool)
     func rowView(_ view: RowView, open url: URL)
     func rowView(_ view: RowView, imageFor reference: String, into imageView: UIImageView)
 }
@@ -164,7 +165,7 @@ final class RowView: UIView {
                 let b = CopyButton(payload: w.payload ?? "")
                 view = b
             case let .disclosure(expanded):
-                let b = DisclosureControl(expanded: expanded, chevron: kind == .tools)
+                let b = DisclosureControl(expanded: expanded, chevron: false)
                 b.addAction(UIAction { [weak self] _ in
                     guard let self else { return }
                     self.delegate?.rowView(self, toggle: d.key)
@@ -200,15 +201,48 @@ final class RowView: UIView {
                 }, for: .touchUpInside)
                 view = b
             case let .icon(name, color):
-                let iv = UIImageView(image: UIImage(systemName: name, withConfiguration: UIImage.SymbolConfiguration(pointSize: rect.height * 0.8, weight: .medium)))
+                // Desktop icon assets (tool-*, fileicon-*), else an SF symbol.
+                let iv: UIImageView
+                if let asset = RowView.asset(name) {
+                    iv = UIImageView(image: asset)
+                    iv.contentMode = .scaleAspectFit
+                } else {
+                    iv = UIImageView(image: UIImage(systemName: name, withConfiguration: UIImage.SymbolConfiguration(pointSize: rect.height * 0.8, weight: .medium)))
+                    iv.contentMode = .center
+                }
                 iv.tintColor = Palette.color(color)
-                iv.contentMode = .center
                 view = iv
+            case let .chevron(expanded):
+                view = ToolChevronView(key: d.key, expanded: expanded)
+            case let .toolRail(trunkX, bend, branchEnd, rowMid, tops, heights):
+                let live = d.widgets.contains { if case .shimmer = $0.kind { return true } else { return false } }
+                view = ToolRailView(key: d.key, trunkX: trunkX, bend: bend, branchEnd: branchEnd, rowMid: rowMid, tops: tops, heights: heights, rowWidth: CGFloat(d.width) - rect.minX, live: live)
+            case let .toolToggle(detail, open):
+                let b = ToolToggleControl()
+                b.accessibilityTraits = .button
+                b.accessibilityLabel = open ? "Hide details" : "Show details"
+                b.addAction(UIAction { [weak self] _ in
+                    guard let self else { return }
+                    UISelectionFeedbackGenerator().selectionChanged()
+                    self.delegate?.rowView(self, toggleDetail: detail, open: open)
+                }, for: .touchUpInside)
+                view = b
+            case .shimmer:
+                view = ShimmerView(model: model!, rect: rect)
             }
             view.frame = rect
             host.addSubview(view)
             widgetViews.append(view)
         }
+    }
+
+    private static var assets: [String: UIImage?] = [:]
+
+    static func asset(_ name: String) -> UIImage? {
+        if let hit = assets[name] { return hit }
+        let image = (name.hasPrefix("tool-") || name.hasPrefix("fileicon-")) ? UIImage(named: name) : nil
+        assets[name] = image
+        return image
     }
 
     @objc private func openImage(_ tap: UITapGestureRecognizer) {

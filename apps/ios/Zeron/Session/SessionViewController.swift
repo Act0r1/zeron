@@ -45,7 +45,7 @@ final class SessionViewController: UIViewController {
         view.addSubview(list)
         setContentScrollView(list, for: .top)
         list.topEdgeEffect.style = .soft
-        list.bottomEdgeEffect.style = .soft
+        list.bottomEdgeEffect.isHidden = true
 
         composer.attachMenu = { [weak self] in
             guard let self else { return UIMenu() }
@@ -93,6 +93,17 @@ final class SessionViewController: UIViewController {
         queue.setGlassVisible(false, animated: false)
         pillRow.isHidden = true
         view.addSubview(bottom)
+        // Transcript fades into the background behind the composer, like the
+        // nav bar's edge effect at the top. A gradient overlay (not a mask on
+        // the scroll view) so scrolling never renders offscreen.
+        bottomFade.translatesAutoresizingMaskIntoConstraints = false
+        view.insertSubview(bottomFade, belowSubview: bottom)
+        NSLayoutConstraint.activate([
+            bottomFade.topAnchor.constraint(equalTo: bottom.topAnchor, constant: -44),
+            bottomFade.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            bottomFade.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            bottomFade.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
 
         jump.addAction(UIAction { [weak self] _ in self?.list.scrollToBottom(animated: true) }, for: .touchUpInside)
         jump.accessibilityIdentifier = "jump-to-latest"
@@ -169,6 +180,8 @@ final class SessionViewController: UIViewController {
             app.markSeen(chatId)
         }
     }
+
+    private let bottomFade = EdgeFadeOverlay()
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()

@@ -28,12 +28,21 @@ enum Palette {
     static let codeBorder = dynamic(0xE4E4E8, 0x1F1F23)
     static let chip = dynamic(0xE7E7EB, 0x1C1C20)
 
-    /// Project colors: a spectrum that sits well next to the violet accent.
+    /// Project tones — the desktop's monogram palette (project_icon.rs):
+    /// slate, blue, violet, rose, amber, emerald, teal, orange. Indexed by the
+    /// core's `project_color_index` (FNV-1a of the project path).
     static let projectDots: [UIColor] = [
-        dynamic(0x5B43E8, 0x8B7CF6), dynamic(0xDB2777, 0xF472B6), dynamic(0x0E7490, 0x22D3EE),
-        dynamic(0xC2410C, 0xFB923C), dynamic(0x15803D, 0x34D399), dynamic(0x2563EB, 0x60A5FA),
-        dynamic(0xA16207, 0xFACC15), dynamic(0x7E22CE, 0xC084FC),
+        dynamic(0x475569, 0x94A3B8), dynamic(0x2563EB, 0x93C5FD), dynamic(0x7C3AED, 0xC4B5FD),
+        dynamic(0xBE123C, 0xFDA4AF), dynamic(0xA16207, 0xFCD34D), dynamic(0x047857, 0x6EE7B7),
+        dynamic(0x0F766E, 0x5EEAD4), dynamic(0xC2410C, 0xFDBA74),
     ]
+
+    /// Desktop sidebar "subline": `text_muted` @ 0.5 (project label, branch).
+    static let subline = dynamic(0x62626A, 0xA9A9AE, alpha: 0.5)
+
+    private static func dual(_ light: UIColor, _ dark: UIColor) -> UIColor {
+        UIColor { $0.userInterfaceStyle == .dark ? dark : light }
+    }
 
     static func color(_ role: ColorRole) -> UIColor {
         switch role {
@@ -67,6 +76,20 @@ enum Palette {
         case .syntaxTag: dynamic(0xBE185D, 0xF472B6)
         case .syntaxAttribute: dynamic(0xB91C1C, 0xF87171)
         case .syntaxEscape: dynamic(0x0E7490, 0x22D3EE)
+        // Tool groups — desktop zeron tokens (see tools.rs).
+        case .textFaint: dynamic(0x797981, 0x85858A)
+        case .textSoft: dynamic(0x303035, 0xE8E8EA, alpha: 0.85)
+        case .toolRail: dual(UIColor(white: 0, alpha: 0.162), UIColor(white: 1, alpha: 0.12))
+        case .toolBadge: dual(UIColor(white: 0, alpha: 0.06), UIColor(white: 1, alpha: 0.06))
+        case .toolWell: dual(UIColor(white: 1, alpha: 0.16), UIColor(white: 0, alpha: 0.16))
+        case .agentCard: dual(UIColor(white: 0, alpha: 0.03), UIColor(white: 1, alpha: 0.03))
+        case .agentCardBorder: dual(UIColor(white: 0, alpha: 0.0945), UIColor(white: 1, alpha: 0.07))
+        case .agentTile: dual(UIColor(white: 0, alpha: 0.08), UIColor(white: 1, alpha: 0.08))
+        case .diffAddWash: dynamic(0x15803D, 0x34D399, alpha: 0.055)
+        case .diffDelWash: dynamic(0xDC2626, 0xF87171, alpha: 0.055)
+        case .diffAddBar: dynamic(0x15803D, 0x34D399, alpha: 0.55)
+        case .diffDelBar: dynamic(0xDC2626, 0xF87171, alpha: 0.55)
+        case .diffHunk: dual(UIColor(hex: 0x5B43E8, alpha: 0.07), UIColor(hex: 0x8B7CF6, alpha: 0.08))
         }
     }
 }

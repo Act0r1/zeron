@@ -127,9 +127,9 @@ final class NewSessionViewController: UIViewController {
     private func refreshChips() {
         var chips: [ComposerChip] = []
         if let p = project {
-            chips.append(ComposerChip(id: "project", title: p.name, symbol: nil, icon: ComposerChip.dot(Palette.projectDots[p.colorIndex % Palette.projectDots.count])))
+            chips.append(ComposerChip(id: "project", title: p.name, symbol: nil, icon: ProjectTile.image(name: p.name, colorIndex: p.colorIndex)))
             if p.git {
-                chips.append(ComposerChip(id: "branch", title: draft.worktree ? "New worktree" : (draft.branch ?? "Current branch"), symbol: draft.worktree ? "square.split.bottomrightquarter" : "arrow.triangle.branch"))
+                chips.append(ComposerChip(id: "branch", title: draft.worktree ? "New worktree" : (draft.branch ?? "Current branch"), symbol: draft.worktree ? "square.split.bottomrightquarter" : nil, icon: draft.worktree ? nil : BranchIcon.sized()))
             }
         } else {
             let host = app.hostOptions.first { $0.id == draft.hostId }

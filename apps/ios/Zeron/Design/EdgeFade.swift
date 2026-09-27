@@ -84,3 +84,31 @@ class FadingScrollView: UIScrollView {
         CATransaction.commit()
     }
 }
+
+/// Content fading into the background at a screen edge (below the composer):
+/// clear at the top of the view → background, eased so there's no visible
+/// band. Pass-through for touches; a plain gradient layer, so it composites
+/// for free while content scrolls underneath.
+final class EdgeFadeOverlay: UIView {
+    override class var layerClass: AnyClass { CAGradientLayer.self }
+    private var gradient: CAGradientLayer { layer as! CAGradientLayer }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        gradient.startPoint = CGPoint(x: 0.5, y: 0)
+        gradient.endPoint = CGPoint(x: 0.5, y: 1)
+        restyle()
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: EdgeFadeOverlay, _) in self.restyle() }
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    private func restyle() {
+        let bg = Palette.background.resolvedColor(with: traitCollection)
+        // Smoothstep-ish ramp over the first ~45%, then solid.
+        let stops: [(CGFloat, CGFloat)] = [(0, 0), (0.12, 0.18), (0.24, 0.5), (0.36, 0.82), (0.46, 0.96), (0.55, 1), (1, 1)]
+        gradient.colors = stops.map { bg.withAlphaComponent($0.1).cgColor }
+        gradient.locations = stops.map { NSNumber(value: Double($0.0)) }
+    }
+}

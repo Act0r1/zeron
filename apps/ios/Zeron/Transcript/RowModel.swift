@@ -80,6 +80,29 @@ final class RowModel: @unchecked Sendable {
         }
     }
 
+    /// Canvas-layer runs whose line box sits inside `rect`, in one color
+    /// (the shimmer highlight re-draws the title this way).
+    func drawRuns(in rect: CGRect, color: UIColor, ctx: CGContext, traits: UITraitCollection) {
+        traits.performAsCurrent {
+            ctx.textMatrix = .identity
+            ctx.clip(to: rect)
+            let cg = color.cgColor
+            for i in runsByLayer[0] {
+                guard let line = lines[i] else { continue }
+                let r = display.runs[i]
+                let baseline = CGFloat(r.baseline)
+                guard baseline > rect.minY, baseline <= rect.maxY + 2, CGFloat(r.x) < rect.maxX else { continue }
+                ctx.saveGState()
+                ctx.setFillColor(cg)
+                ctx.translateBy(x: CGFloat(r.x), y: baseline)
+                ctx.scaleBy(x: 1, y: -1)
+                ctx.textPosition = .zero
+                CTLineDraw(line, ctx)
+                ctx.restoreGState()
+            }
+        }
+    }
+
     /// Runs under a fade: painted into a transparency layer, clipped at a
     /// trailing fade's end, then erased along the ramp — the text itself
     /// fades, whatever the background.

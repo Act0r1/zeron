@@ -24,18 +24,18 @@ use zeron_proto::{
 use crate::catalog;
 use crate::connectivity::{PRESENCE_FRESH_MS, SendState};
 
-/// Size of the project color palette [`ProjectRef::color_index`] indexes.
-pub const PROJECT_COLOR_COUNT: u32 = 10;
+/// Size of the project color palette [`ProjectRef::color_index`] indexes —
+/// the desktop's monogram palette (`ui/src/shell/project_icon.rs`).
+pub const PROJECT_COLOR_COUNT: u32 = 8;
 
-/// Stable palette slot for a project (FNV-1a of its id): the same project gets
-/// the same color on every device and across launches.
-pub fn project_color_index(space_id: &str) -> u32 {
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in space_id.bytes() {
-        hash ^= byte as u64;
-        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
-    }
-    (hash % PROJECT_COLOR_COUNT as u64) as u32
+/// Stable palette slot for a project, exactly as the desktop picks its
+/// monogram tone: 32-bit FNV-1a of the project's path (`"home"` without a
+/// project), so a project has the same color on every device.
+pub fn project_color_index(space_path: &str) -> u32 {
+    let hash = space_path
+        .bytes()
+        .fold(2_166_136_261u32, |h, b| (h ^ u32::from(b)).wrapping_mul(16_777_619));
+    hash % PROJECT_COLOR_COUNT
 }
 
 /// Compact age label for list rows: `now`, `34m`, `4h`, `2d` (legacy
@@ -445,7 +445,7 @@ fn build_row(chat: &Chat, rc: &RowContext<'_>, cx: &DeriveContext<'_>) -> Arc<Se
         .map(|space| ProjectRef {
             id: space.id.clone(),
             name: space.display_name().to_owned(),
-            color_index: project_color_index(&space.id),
+            color_index: project_color_index(&space.path),
         });
     let device = rc.devices.get(chat.device_id.as_str());
     let config = chat.config.as_ref();
@@ -621,7 +621,7 @@ pub(crate) fn derive(
                 id: space.id.clone(),
                 name: space.display_name().to_owned(),
                 path: space.path.clone(),
-                color_index: project_color_index(&space.id),
+                color_index: project_color_index(&space.path),
                 device_id: space.device_id.clone(),
                 device_name: rc
                     .devices

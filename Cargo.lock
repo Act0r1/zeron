@@ -12257,6 +12257,7 @@ version = "0.2.94"
 dependencies = [
  "serde",
  "serde_json",
+ "similar",
  "thiserror 2.0.20",
  "uniffi",
  "zeron-client",

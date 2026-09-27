@@ -258,7 +258,9 @@ final class AppModel {
             id: r.id,
             title: r.title,
             projectName: r.project?.name ?? r.deviceName ?? "No project",
-            colorIndex: Int(r.project?.colorIndex ?? 0),
+            hasProject: r.project != nil,
+            // Project-less sessions tone like the desktop's "home" tile.
+            colorIndex: Int(r.project?.colorIndex ?? projectColorIndex(spacePath: "home")),
             harness: r.harness,
             branch: r.branch,
             pr: r.pullRequest.map { pr in

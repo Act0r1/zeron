@@ -20,6 +20,7 @@ use zeron_text::WhiteSpace;
 use super::display::{ColorRole, DisplayBuilder, FadeEdge, TextRun, WidgetKind};
 use super::markdown::{Ctx, PBlock, PText, Px, place, place_text, prepare_block, prepare_plain};
 use super::style::{Family, TYPE, Weight};
+use super::tools::{ToolGroup, place_tools};
 
 /// Row kinds the painter may style differently (e.g. context menus).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
@@ -61,7 +62,7 @@ pub(crate) fn row_key(id: &str) -> u64 {
 }
 
 static VERSION: AtomicU64 = AtomicU64::new(1);
-fn next_version() -> u64 {
+pub(crate) fn next_version() -> u64 {
     VERSION.fetch_add(1, Ordering::Relaxed)
 }
 
@@ -71,22 +72,6 @@ pub(crate) struct UserBubble {
     pub pending: bool,
     pub expanded: bool,
     pub more: PText,
-}
-
-pub(crate) struct ToolLine {
-    pub label: PText,
-    pub detail: PText,
-    pub title: String,
-    pub full: String,
-    pub running: bool,
-    pub failed: bool,
-}
-
-pub(crate) struct ToolGroup {
-    pub summary: PText,
-    pub lines: Vec<ToolLine>,
-    pub expanded: bool,
-    pub running: bool,
 }
 
 pub(crate) struct Chip {
@@ -130,7 +115,6 @@ pub(crate) enum Gap {
     Reply,
     Block,
     Heading,
-    Tight,
 }
 
 pub(crate) mod geom {
@@ -141,7 +125,6 @@ pub(crate) mod geom {
     pub const GAP_REPLY: f32 = 18.0;
     pub const GAP_BLOCK: f32 = 12.0;
     pub const GAP_HEADING: f32 = 22.0;
-    pub const GAP_TIGHT: f32 = 6.0;
     pub const BUBBLE_PAD_X: f32 = 15.0;
     pub const BUBBLE_PAD_Y: f32 = 10.0;
     pub const BUBBLE_RADIUS: f32 = 20.0;
@@ -150,7 +133,6 @@ pub(crate) mod geom {
     pub const BUBBLE_FOLD_LINES: usize = 8;
     pub const BUBBLE_FOLD_SHOW: usize = 6;
     pub const THUMB: f32 = 76.0;
-    pub const TOOL_LINE: f32 = 30.0;
     pub const CHIP_LINE: f32 = 32.0;
     pub const IMAGE: f32 = 260.0;
     pub const WORKING: f32 = 36.0;
@@ -165,7 +147,6 @@ impl Gap {
             Gap::Reply => GAP_REPLY,
             Gap::Block => GAP_BLOCK,
             Gap::Heading => GAP_HEADING,
-            Gap::Tight => GAP_TIGHT,
         })
     }
 }
@@ -194,6 +175,8 @@ pub(crate) struct RowBuilder {
     working: Option<Arc<RowCore>>,
     pub expanded: HashSet<u64>,
     pub collapsed: HashSet<u64>,
+    /// Per-tool inline detail overrides (row detail key → open).
+    pub detail_open: HashMap<u64, bool>,
 }
 
 fn quick_hash(s: &str) -> u64 {
@@ -355,15 +338,34 @@ impl RowBuilder {
             }
             let id = format!("{}#g{}", entry.id, group_ix);
             *group_ix += 1;
-            let gap = if rows.is_empty() { gap_for(rows, false) } else { Gap::Tight };
-            let row = this.tool_row(ctx, &entry.id, &id, tools, streaming && tail);
+            let gap = gap_for(rows, false);
+            let agents = tools.iter().any(|p| matches!(p, MessagePart::Tool { call, .. } if call.is_subagent_spawn()));
+            let row = this.tool_row(ctx, &entry.id, &id, tools, streaming && tail, agents);
             rows.push(Placed { core: Arc::new(row), gap });
             tools.clear();
         };
         let nparts = entry.parts.len();
         for (pi, part) in entry.parts.iter().enumerate() {
             match part {
-                MessagePart::Tool { .. } => tools.push(part),
+                // Consecutive tools and thoughts share a group; subagent
+                // spawns never share one with ordinary tools (desktop genus).
+                MessagePart::Tool { call, .. } => {
+                    let spawn = call.is_subagent_spawn();
+                    let genus_flip = tools.iter().any(|p| match p {
+                        MessagePart::Tool { call, .. } => call.is_subagent_spawn() != spawn,
+                        _ => spawn,
+                    });
+                    if genus_flip {
+                        flush_tools(self, ctx, &mut rows, &mut tools, &mut group_ix, false);
+                    }
+                    tools.push(part);
+                }
+                MessagePart::Reasoning { text, .. } if !text.trim().is_empty() => {
+                    if tools.iter().any(|p| matches!(p, MessagePart::Tool { call, .. } if call.is_subagent_spawn())) {
+                        flush_tools(self, ctx, &mut rows, &mut tools, &mut group_ix, false);
+                    }
+                    tools.push(part);
+                }
                 MessagePart::Reasoning { .. } => {}
                 _ => {
                     flush_tools(self, ctx, &mut rows, &mut tools, &mut group_ix, false);
@@ -497,65 +499,6 @@ impl RowBuilder {
         }
     }
 
-    fn tool_row(&mut self, ctx: &mut Ctx, entry_id: &str, id: &str, tools: &[&MessagePart], live: bool) -> RowCore {
-        let key = row_key(id);
-        let calls: Vec<(zeron_proto::ToolCall, bool)> = tools
-            .iter()
-            .filter_map(|p| match p {
-                MessagePart::Tool { call, is_error, .. } => Some((call.clone(), *is_error)),
-                _ => None,
-            })
-            .collect();
-        let running = tools.iter().any(|p| matches!(p, MessagePart::Tool { resolved: false, .. }));
-        let expanded = if self.expanded.contains(&key) {
-            true
-        } else if self.collapsed.contains(&key) {
-            false
-        } else {
-            live // Auto-open while it's the live tail, like desktop.
-        };
-        let (size, lh) = TYPE.small;
-        let lh = ctx.typo.px(lh);
-        let summary_style = ctx.typo.style(Family::Sans, Weight::Medium, false, size);
-        let summary = zeron_proto::view::tool_group_summary(&calls);
-        let summary = prepare_plain(ctx, &summary, summary_style, lh, ColorRole::TextSecondary, WhiteSpace::Pre);
-        let label_style = ctx.typo.style(Family::Sans, Weight::Medium, false, size);
-        let detail_style = ctx.typo.style(Family::Mono, Weight::Regular, false, size - 1.0);
-        let lines = if expanded {
-            tools
-                .iter()
-                .filter_map(|p| match p {
-                    MessagePart::Tool { call, is_error, resolved, .. } => {
-                        let (label, detail) = zeron_proto::view::tool_chip_content(call);
-                        Some(ToolLine {
-                            title: label.to_owned(),
-                            full: detail.clone(),
-                            label: prepare_plain(ctx, label, label_style, lh, ColorRole::TextSecondary, WhiteSpace::Pre),
-                            detail: prepare_plain(ctx, &detail, detail_style, lh, ColorRole::TextTertiary, WhiteSpace::Normal),
-                            running: !resolved,
-                            failed: *is_error,
-                        })
-                    }
-                    _ => None,
-                })
-                .collect()
-        } else {
-            Vec::new()
-        };
-        RowCore {
-            key,
-            version: next_version(),
-            kind: RowKind::Tools,
-            entry_id: Arc::from(entry_id),
-            content: Content::Tools(ToolGroup {
-                summary,
-                lines,
-                expanded,
-                running,
-            }),
-            copy_text: String::new(),
-        }
-    }
 }
 
 /// User prompt text with `[name](zeron-file:path)` mentions shown as atomic
@@ -691,7 +634,7 @@ pub(crate) fn place_row(core: &RowCore, gap: Gap, px: Px, width: f32, mut out: O
 /// fades instead of cutting: a one-line slot keeps the line unwrapped and
 /// fades it out at the slot's right edge; a multi-line slot fades its last
 /// visible line downward.
-fn place_text_lines(t: &PText, x: f32, y: f32, width: f32, max_lines: usize, px: Px, out: &mut DisplayBuilder) -> f32 {
+pub(crate) fn place_text_lines(t: &PText, x: f32, y: f32, width: f32, max_lines: usize, px: Px, out: &mut DisplayBuilder) -> f32 {
     let runs_before = out.runs.len();
     if max_lines == 1 && t.p.max_content_width() > width {
         // One unwrapped line; runs starting past the slot are dropped, the
@@ -770,44 +713,6 @@ fn place_user(u: &UserBubble, px: Px, x: f32, y: f32, cw: f32, out: Option<&mut 
     h
 }
 
-fn place_tools(t: &ToolGroup, px: Px, x: f32, y: f32, cw: f32, out: Option<&mut DisplayBuilder>) -> f32 {
-    use geom::*;
-    let line = px.v(TOOL_LINE);
-    let h = line * (1 + t.lines.len()) as f32;
-    let Some(out) = out else { return h };
-    let s = px.v(14.0);
-    let icon_x = x;
-    out.widget(
-        WidgetKind::ToolStatus { running: t.running, failed: false },
-        (icon_x, y + (line - s) / 2.0, s, s),
-        None,
-    );
-    let sx = x + px.v(22.0);
-    let sw = t.summary.p.max_content_width().min(cw - px.v(48.0));
-    place_text_lines(&t.summary, sx, y + (line - t.summary.lh) / 2.0, sw.max(1.0), 1, px, out);
-    out.widget(
-        WidgetKind::Disclosure { expanded: t.expanded },
-        (x, y, (sw + px.v(48.0)).min(cw), line),
-        None,
-    );
-    for (i, l) in t.lines.iter().enumerate() {
-        let ly = y + line * (i + 1) as f32;
-        out.widget(
-            WidgetKind::ToolStatus { running: l.running, failed: l.failed },
-            (icon_x + px.v(3.0), ly + (line - px.v(8.0)) / 2.0, px.v(8.0), px.v(8.0)),
-            None,
-        );
-        let lw = l.label.p.max_content_width();
-        place_text(&l.label, sx, ly + (line - l.label.lh) / 2.0, lw + 1.0, Some(out));
-        let dx = sx + lw + px.v(8.0);
-        place_text_lines(&l.detail, dx, ly + (line - l.detail.lh) / 2.0, (x + cw - dx).max(1.0), 1, px, out);
-        if !l.full.is_empty() {
-            out.widget(WidgetKind::Detail { title: l.title.clone() }, (x, ly, cw, line), Some(l.full.clone()));
-        }
-    }
-    h
-}
-
 /// Heap held by a row's prepared text (diagnostics; blocks recurse).
 pub(crate) fn content_heap_bytes(content: &Content) -> usize {
     fn block(b: &PBlock) -> usize {
@@ -826,7 +731,7 @@ pub(crate) fn content_heap_bytes(content: &Content) -> usize {
     match content {
         Content::Block(b) => block(b),
         Content::User(u) => u.text.p.heap_bytes() + u.more.p.heap_bytes(),
-        Content::Tools(t) => t.summary.p.heap_bytes() + t.lines.iter().map(|l| l.label.p.heap_bytes() + l.detail.p.heap_bytes()).sum::<usize>(),
+        Content::Tools(t) => super::tools::heap_bytes(t),
         Content::Chip(c) => c.text.p.heap_bytes(),
         Content::Image { reference } => reference.len(),
         Content::Working { .. } => 0,

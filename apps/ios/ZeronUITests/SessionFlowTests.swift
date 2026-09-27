@@ -177,11 +177,13 @@ final class SessionFlowTests: XCTestCase {
         let expand = app.buttons["Expand"].firstMatch
         XCTAssertTrue(expand.waitForExistence(timeout: 10))
         expand.tap()
-        let detail = app.buttons.matching(NSPredicate(format: "label ENDSWITH ' details'")).firstMatch
+        let detail = app.buttons["Show details"].firstMatch
         XCTAssertTrue(detail.waitForExistence(timeout: 5))
         snapshot(app, "tools-expanded")
+        // Details open inline under the row, like desktop.
         detail.tap()
-        XCTAssertTrue(app.textViews.firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Hide details"].firstMatch.waitForExistence(timeout: 5))
+        sleep(1)
         snapshot(app, "tool-detail")
     }
 
@@ -271,5 +273,37 @@ final class SessionFlowTests: XCTestCase {
         sleep(3)
         XCTAssertTrue(app.buttons["jump-to-latest"].isHittable, "stays scrolled up while the reply streams")
         snapshot(app, "scrolled-up-streaming")
+    }
+
+    /// Desktop tool rows: file badges, inline stats/diff detail, thoughts,
+    /// and a live group streaming in.
+    func testToolGroupsRenderLikeDesktop() {
+        let app = launch(["-route", "chat:chat-veil", "-big"])
+        let transcript = app.scrollViews["transcript"]
+        XCTAssertTrue(transcript.waitForExistence(timeout: 10))
+        for _ in 0..<1 {
+            let expand = app.buttons["Expand"].firstMatch
+            guard expand.exists, expand.isHittable else { break }
+            expand.tap()
+            sleep(1)
+        }
+        snapshot(app, "tool-groups")
+        let details = app.buttons.matching(identifier: "Show details")
+        if details.count > 1 {
+            details.element(boundBy: 1).tap()
+            sleep(1)
+            snapshot(app, "tool-row-detail")
+        }
+        app.terminate()
+        let live = launch(["-route", "chat:chat-home"], fast: false)
+        let input = live.textViews["composer-input"]
+        XCTAssertTrue(input.waitForExistence(timeout: 10))
+        input.tap()
+        input.typeText("Refactor the layout pass")
+        live.buttons["composer-send"].tap()
+        for k in 0..<6 {
+            sleep(1)
+            snapshot(live, "live-tools-\(k)")
+        }
     }
 }

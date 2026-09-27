@@ -54,7 +54,7 @@ final class CoreSessionSource: SessionSource {
             let state: SessionRowVM.PR = switch pr.state { case .open: .open; case .merged: .merged; case .closed: .closed }
             chips.append(ComposerChip(id: "pr", title: "\(pr.number)", symbol: nil, tint: PRBadgeView.tone(state), icon: PRIcon.image(side: 12)))
         } else if let b = row?.branch, !b.isEmpty {
-            chips.append(ComposerChip(id: "branch", title: b, symbol: "arrow.triangle.branch"))
+            chips.append(ComposerChip(id: "branch", title: b, symbol: nil, icon: BranchIcon.sized()))
         }
         if let usage = c.contextUsage, let tokens = usage.tokens, let window = usage.window, window > 0 {
             let fraction = Double(tokens) / Double(window)

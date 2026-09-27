@@ -17,6 +17,8 @@ struct SessionRowVM: Hashable {
     let id: String
     var title: String
     var projectName: String
+    /// False for project-less sessions (the tile reads "H" for Home, like desktop).
+    var hasProject: Bool
     var colorIndex: Int
     var harness: String?
     var branch: String?
@@ -48,7 +50,7 @@ final class SessionCell: UICollectionViewListCell {
 
     private let harness = UIImageView()
     private let title = FadingLabel()
-    private let projectDot = UIView()
+    private let projectTile = ProjectTileView()
     private let meta = FadingLabel()
     private let time = UILabel()
     private let status = StatusGlyph()
@@ -57,12 +59,11 @@ final class SessionCell: UICollectionViewListCell {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        projectDot.layer.cornerRadius = 3.5
         title.textColor = Palette.text
         time.textAlignment = .right
         harness.contentMode = .scaleAspectFit
         harness.tintColor = Palette.text
-        for v in [harness, title, projectDot, meta, time, status, prBadge] as [UIView] { contentView.addSubview(v) }
+        for v in [harness, title, projectTile, meta, time, status, prBadge] as [UIView] { contentView.addSubview(v) }
         var bg = UIBackgroundConfiguration.listCell()
         bg.backgroundColor = .clear
         backgroundConfiguration = bg
@@ -103,10 +104,17 @@ final class SessionCell: UICollectionViewListCell {
         title.text = vm.title
         title.font = Fonts.ui(vm.unseen ? .sansSemibold : .sansMedium, TypeScale.size(16.5))
         title.textColor = vm.unseen || vm.status != .idle ? Palette.text : Palette.text.withAlphaComponent(0.88)
-        projectDot.backgroundColor = Palette.projectDots[vm.colorIndex % Palette.projectDots.count]
+        projectTile.configure(name: vm.hasProject ? vm.projectName : "Home", colorIndex: vm.colorIndex)
         let metaText = NSMutableAttributedString(string: vm.projectName, attributes: [.font: Fonts.ui(.sans, TypeScale.size(13.5)), .foregroundColor: Palette.secondary])
-        if let b = vm.branch, !b.isEmpty {
-            metaText.append(NSAttributedString(string: "  " + b, attributes: [.font: Fonts.ui(.mono, TypeScale.size(12)), .foregroundColor: Palette.tertiary]))
+        if let b = vm.branch, !b.isEmpty, let icon = BranchIcon.image?.withTintColor(Palette.subline, renderingMode: .alwaysOriginal) {
+            // Desktop line 3: git-branch icon + branch in the subline tone.
+            let font = Fonts.ui(.sans, TypeScale.size(12.5))
+            let side = (12 * TypeScale.factor).rounded()
+            let attach = NSTextAttachment(image: icon)
+            attach.bounds = CGRect(x: 0, y: (font.capHeight - side) / 2, width: side, height: side)
+            metaText.append(NSAttributedString(string: "   "))
+            metaText.append(NSAttributedString(attachment: attach))
+            metaText.append(NSAttributedString(string: " " + b, attributes: [.font: font, .foregroundColor: Palette.subline]))
         }
         meta.attributedText = metaText
         if let pr = vm.pr, let n = vm.prNumber {
@@ -154,8 +162,9 @@ final class SessionCell: UICollectionViewListCell {
             trailing = status.frame.minX - 10
         }
         title.frame = CGRect(x: textX, y: titleY, width: max(0, trailing - textX), height: titleH)
-        projectDot.frame = CGRect(x: textX, y: metaY + metaH / 2 - 3.5, width: 7, height: 7)
-        let x = textX + 7 + 7
+        let tile = (14 * k).rounded()
+        projectTile.frame = CGRect(x: textX, y: metaY + (metaH - tile) / 2, width: tile, height: tile)
+        let x = textX + tile + 7
         var metaRight = b.width - right
         if !prBadge.isHidden {
             let size = prBadge.intrinsicContentSize

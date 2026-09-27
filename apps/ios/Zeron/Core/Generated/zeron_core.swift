@@ -3269,6 +3269,11 @@ public protocol TranscriptViewProtocol: AnyObject, Sendable {
      */
     func toggle(key: UInt64) 
     
+    /**
+     * Flip one tool row's inline detail (`open` = its state as painted).
+     */
+    func toggleDetail(row: UInt64, detail: UInt64, `open`: Bool) 
+    
 }
 /**
  * One transcript's layout engine.
@@ -3402,6 +3407,20 @@ open func toggle(key: UInt64)  {try! rustCall() {
     uniffi_zeron_mobile_fn_method_transcriptview_toggle(
             self.uniffiCloneHandle(),
         FfiConverterUInt64.lower(key),uniffiCallStatus
+    )
+}
+}
+    
+    /**
+     * Flip one tool row's inline detail (`open` = its state as painted).
+     */
+open func toggleDetail(row: UInt64, detail: UInt64, `open`: Bool)  {try! rustCall() {
+        uniffiCallStatus in
+    uniffi_zeron_mobile_fn_method_transcriptview_toggle_detail(
+            self.uniffiCloneHandle(),
+        FfiConverterUInt64.lower(row),
+        FfiConverterUInt64.lower(detail),
+        FfiConverterBool.lower(`open`),uniffiCallStatus
     )
 }
 }
@@ -8576,6 +8595,40 @@ public enum ColorRole: Equatable, Hashable {
     case syntaxTag
     case syntaxAttribute
     case syntaxEscape
+    /**
+     * `text_faint`: detail bodies.
+     */
+    case textFaint
+    /**
+     * `text` @ 0.85: file badge names, agent card details.
+     */
+    case textSoft
+    /**
+     * `hairline(0.12)`: the activity rail.
+     */
+    case toolRail
+    /**
+     * `ink(0.06)`: file badge fill.
+     */
+    case toolBadge
+    /**
+     * File-icon well inside a badge.
+     */
+    case toolWell
+    /**
+     * `ink(0.03)` / `hairline(0.07)` / `ink(0.08)`: subagent cards and tiles.
+     */
+    case agentCard
+    case agentCardBorder
+    case agentTile
+    /**
+     * Diff rows: wash (0.055), accent bar (0.55), hunk header.
+     */
+    case diffAddWash
+    case diffDelWash
+    case diffAddBar
+    case diffDelBar
+    case diffHunk
 
 
 
@@ -8662,6 +8715,32 @@ public struct FfiConverterTypeColorRole: FfiConverterRustBuffer {
         case 32: return .syntaxAttribute
         
         case 33: return .syntaxEscape
+        
+        case 34: return .textFaint
+        
+        case 35: return .textSoft
+        
+        case 36: return .toolRail
+        
+        case 37: return .toolBadge
+        
+        case 38: return .toolWell
+        
+        case 39: return .agentCard
+        
+        case 40: return .agentCardBorder
+        
+        case 41: return .agentTile
+        
+        case 42: return .diffAddWash
+        
+        case 43: return .diffDelWash
+        
+        case 44: return .diffAddBar
+        
+        case 45: return .diffDelBar
+        
+        case 46: return .diffHunk
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -8801,6 +8880,58 @@ public struct FfiConverterTypeColorRole: FfiConverterRustBuffer {
         
         case .syntaxEscape:
             writeInt(&buf, Int32(33))
+        
+        
+        case .textFaint:
+            writeInt(&buf, Int32(34))
+        
+        
+        case .textSoft:
+            writeInt(&buf, Int32(35))
+        
+        
+        case .toolRail:
+            writeInt(&buf, Int32(36))
+        
+        
+        case .toolBadge:
+            writeInt(&buf, Int32(37))
+        
+        
+        case .toolWell:
+            writeInt(&buf, Int32(38))
+        
+        
+        case .agentCard:
+            writeInt(&buf, Int32(39))
+        
+        
+        case .agentCardBorder:
+            writeInt(&buf, Int32(40))
+        
+        
+        case .agentTile:
+            writeInt(&buf, Int32(41))
+        
+        
+        case .diffAddWash:
+            writeInt(&buf, Int32(42))
+        
+        
+        case .diffDelWash:
+            writeInt(&buf, Int32(43))
+        
+        
+        case .diffAddBar:
+            writeInt(&buf, Int32(44))
+        
+        
+        case .diffDelBar:
+            writeInt(&buf, Int32(45))
+        
+        
+        case .diffHunk:
+            writeInt(&buf, Int32(46))
         
         }
     }
@@ -10766,6 +10897,31 @@ public enum WidgetKind: Equatable, Hashable {
      */
     case icon(name: String, color: ColorRole
     )
+    /**
+     * A tool group's disclosure chevron (rotates between states).
+     */
+    case chevron(expanded: Bool
+    )
+    /**
+     * The activity rail of an expanded tool group, in the widget's
+     * coordinates: a 1pt trunk at `trunk_x` from each row's top down to a
+     * quadratic elbow (radius `bend`) at `row_mid` below the row top, then a
+     * branch to `branch_end`. The trunk continues through a row's full
+     * height (open details) into the next row.
+     */
+    case toolRail(trunkX: Float, bend: Float, branchEnd: Float, rowMid: Float, tops: [Float], heights: [Float]
+    )
+    /**
+     * Tap target toggling one tool row's inline detail.
+     */
+    case toolToggle(detail: UInt64, `open`: Bool
+    )
+    /**
+     * Shimmer sweep over the active group's title (text drawn by the canvas
+     * underneath; the painter re-draws those runs brighter through a moving
+     * gradient).
+     */
+    case shimmer
 
 
 
@@ -10808,6 +10964,17 @@ public struct FfiConverterTypeWidgetKind: FfiConverterRustBuffer {
         
         case 8: return .icon(name: try FfiConverterString.read(from: &buf), color: try FfiConverterTypeColorRole.read(from: &buf)
         )
+        
+        case 9: return .chevron(expanded: try FfiConverterBool.read(from: &buf)
+        )
+        
+        case 10: return .toolRail(trunkX: try FfiConverterFloat.read(from: &buf), bend: try FfiConverterFloat.read(from: &buf), branchEnd: try FfiConverterFloat.read(from: &buf), rowMid: try FfiConverterFloat.read(from: &buf), tops: try FfiConverterSequenceFloat.read(from: &buf), heights: try FfiConverterSequenceFloat.read(from: &buf)
+        )
+        
+        case 11: return .toolToggle(detail: try FfiConverterUInt64.read(from: &buf), open: try FfiConverterBool.read(from: &buf)
+        )
+        
+        case 12: return .shimmer
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -10857,6 +11024,31 @@ public struct FfiConverterTypeWidgetKind: FfiConverterRustBuffer {
             FfiConverterString.write(name, into: &buf)
             FfiConverterTypeColorRole.write(color, into: &buf)
             
+        
+        case let .chevron(expanded):
+            writeInt(&buf, Int32(9))
+            FfiConverterBool.write(expanded, into: &buf)
+            
+        
+        case let .toolRail(trunkX,bend,branchEnd,rowMid,tops,heights):
+            writeInt(&buf, Int32(10))
+            FfiConverterFloat.write(trunkX, into: &buf)
+            FfiConverterFloat.write(bend, into: &buf)
+            FfiConverterFloat.write(branchEnd, into: &buf)
+            FfiConverterFloat.write(rowMid, into: &buf)
+            FfiConverterSequenceFloat.write(tops, into: &buf)
+            FfiConverterSequenceFloat.write(heights, into: &buf)
+            
+        
+        case let .toolToggle(detail,`open`):
+            writeInt(&buf, Int32(11))
+            FfiConverterUInt64.write(detail, into: &buf)
+            FfiConverterBool.write(`open`, into: &buf)
+            
+        
+        case .shimmer:
+            writeInt(&buf, Int32(12))
+        
         }
     }
 }
@@ -12475,13 +12667,13 @@ public func projectColorCount() -> UInt32  {
 })
 }
 /**
- * Stable palette slot for a project id.
+ * Stable palette slot for a project path (`"home"` without a project).
  */
-public func projectColorIndex(spaceId: String) -> UInt32  {
+public func projectColorIndex(spacePath: String) -> UInt32  {
     return try!  FfiConverterUInt32.lift(try! rustCall() {
         uniffiCallStatus in
     uniffi_zeron_mobile_fn_func_project_color_index(
-        FfiConverterString.lower(spaceId),uniffiCallStatus
+        FfiConverterString.lower(spacePath),uniffiCallStatus
     )
 })
 }
@@ -12616,7 +12808,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_zeron_mobile_checksum_func_project_color_count() != 30925) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_zeron_mobile_checksum_func_project_color_index() != 7128) {
+    if (uniffi_zeron_mobile_checksum_func_project_color_index() != 14874) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_zeron_mobile_checksum_func_reasoning_label() != 22513) {
@@ -12938,6 +13130,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_zeron_mobile_checksum_method_transcriptview_toggle() != 51051) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_zeron_mobile_checksum_method_transcriptview_toggle_detail() != 17098) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_zeron_mobile_checksum_constructor_coreclient_new() != 27504) {

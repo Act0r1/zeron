@@ -96,7 +96,7 @@ final class FixtureSessionSource: SessionSource {
         chrome.chips = [
             ComposerChip(id: "model", title: "Opus 4.5", symbol: nil, icon: BrandMarks.image(for: "claude-code", side: 13)),
             ComposerChip(id: "effort", title: "High", symbol: "gauge.with.dots.needle.67percent"),
-            ComposerChip(id: "branch", title: "ios-rewrite", symbol: "arrow.triangle.branch"),
+            ComposerChip(id: "branch", title: "ios-rewrite", symbol: nil, icon: BranchIcon.sized()),
         ]
         for i in 0..<3 {
             entries.append(DebugEntry(id: "u\(i)", user: true, text: TranscriptLabViewController.prompts[i], streaming: false))

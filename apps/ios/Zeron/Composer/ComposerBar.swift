@@ -27,14 +27,6 @@ struct ComposerChip: Equatable {
     var tint: UIColor? = nil
     /// Brand mark / custom glyph (takes precedence over `symbol`).
     var icon: UIImage? = nil
-
-    /// A small filled circle (project color) as a chip glyph.
-    static func dot(_ color: UIColor, side: CGFloat = 8) -> UIImage {
-        UIGraphicsImageRenderer(size: CGSize(width: side, height: side)).image { ctx in
-            color.setFill()
-            ctx.cgContext.fillEllipse(in: CGRect(x: 0, y: 0, width: side, height: side))
-        }.withRenderingMode(.alwaysOriginal)
-    }
 }
 
 /// The composer. One glass surface with two states that morph into each
