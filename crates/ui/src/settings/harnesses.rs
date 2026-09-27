@@ -324,6 +324,8 @@ impl HarnessesPage {
                 label.child(
                     widgets::ghost_action(theme)
                         .id(format!("harness-update-ignore-{harness:?}"))
+                        // Optically align the label with the select's edge.
+                        .mr(px(-10.0))
                         .on_click(cx.listener(move |page, _, _, cx| {
                             page.dismiss_harness_update(harness, cx)
                         }))
