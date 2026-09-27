@@ -366,11 +366,45 @@ final class SessionViewController: UIViewController, UIGestureRecognizerDelegate
         render(animated: true)
     }
 
+    /// Called once, when the transcript's first rows are laid out.
+    private var onFirstFrame: (() -> Void)?
+
+    /// Lay the transcript out before the push that shows it. At the start
+    /// of a push the nav bar decides whether content sits under it; a
+    /// transcript still waiting on its first frame read as empty, so the
+    /// session slid in with its text crisp under the title and the soft
+    /// edge effect snapped on at the end. With the rows in place the effect
+    /// fades in with the transition, like any list. `ready` runs on the
+    /// first rows (typically well under 150 ms), or after `timeout`.
+    func prepareForPush(size: CGSize, timeout: TimeInterval = 0.3, ready: @escaping () -> Void) {
+        var fired = false
+        let fire = {
+            guard !fired else { return }
+            fired = true
+            ready()
+        }
+        loadViewIfNeeded()
+        view.frame = CGRect(origin: .zero, size: size)
+        view.layoutIfNeeded()
+        if reportedOpen { return fire() }
+        onFirstFrame = fire
+        DispatchQueue.main.asyncAfter(deadline: .now() + timeout, execute: fire)
+    }
+
+    /// Prepared but never shown (the push was abandoned): let the session go.
+    func discardUnshown() {
+        guard !hasAppeared, isViewLoaded else { return }
+        source.detach()
+        engine.close()
+    }
+
     private func applyFrame() {
         let frame = engine.frame()
         list.apply(frame)
         if !reportedOpen, frame.rowCount() > 0 {
             reportedOpen = true
+            onFirstFrame?()
+            onFirstFrame = nil
             // Open latency: push → first measured frame on screen.
             let ms = (CACurrentMediaTime() - openedAt) * 1000
             let json = String(format: "{\"openMs\":%.1f,\"rows\":%d,\"layoutPassMs\":%.2f}", ms, frame.rowCount(), Double(frame.buildMicros()) / 1000)
