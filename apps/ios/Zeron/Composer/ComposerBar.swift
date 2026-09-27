@@ -438,7 +438,9 @@ final class ComposerBar: UIView, UITextViewDelegate, UIGestureRecognizerDelegate
             config.contentInsets = NSDirectionalEdgeInsets(top: 7, leading: 11, bottom: 7, trailing: 11)
             config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attrs in
                 var a = attrs
-                let mono = chip.id == "branch" || chip.id == "pr"
+                // PR numbers stay mono like the list's PR badges; the checkout
+                // chip (branch / New worktree) reads as ordinary UI text.
+                let mono = chip.id == "pr"
                 a.font = Fonts.ui(mono ? .monoMedium : .sansMedium, mono ? 12.5 : 13.5)
                 return a
             }
