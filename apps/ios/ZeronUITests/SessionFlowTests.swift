@@ -452,4 +452,22 @@ final class SessionFlowTests: XCTestCase {
         XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Uploading'")).firstMatch.exists, "no upload banner")
         XCTAssertTrue(app.staticTexts.matching(identifier: "row-markdown").element(boundBy: 0).waitForExistence(timeout: 20), "the turn runs once uploaded")
     }
+
+    /// Desktop runway: an immediate send glides the prompt to the top and the
+    /// reply streams into the reserved space below it.
+    func testSendGlidesPromptToTopWithRunway() {
+        let app = launch(["-route", "chat:chat-veil", "-big"], fast: false)
+        let input = app.textViews["composer-input"]
+        XCTAssertTrue(input.waitForExistence(timeout: 10))
+        input.tap()
+        input.typeText("Runway check: summarize the veil work")
+        app.buttons["composer-send"].tap()
+        let prompt = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'You: Runway check'")).firstMatch
+        XCTAssertTrue(prompt.waitForExistence(timeout: 5))
+        sleep(1)
+        let top = app.scrollViews["transcript"].frame.minY
+        XCTAssertLessThan(prompt.frame.minY - top, 200, "prompt glided to the top of the transcript")
+        snapshot(app, "runway")
+        XCTAssertFalse(app.buttons["jump-to-latest"].isHittable, "held runway is 'the bottom'")
+    }
 }

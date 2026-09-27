@@ -34,6 +34,96 @@ final class TranscriptListView: UIScrollView, RowViewDelegate, UIScrollViewDeleg
     var onDistanceFromBottom: ((CGFloat) -> Void)?
     var imageLoader: ((String, UIImageView) -> Void)?
 
+    // MARK: Runway (desktop transcript.rs `OwnTurnAnchor`)
+    //
+    // On an immediate send the prompt glides to the top of the viewport and
+    // the content is held at least one viewport tall below it, so the reply
+    // streams into reserved space without the view moving on every token.
+    // The reply consumes the reservation; once it fills it, the runway retires
+    // and the normal follow-the-tail spring takes over. A drag releases the
+    // hold (the reservation stays as plain scroll room); coming back to the
+    // bottom — or Jump to latest — glides back to the held position.
+    private struct OwnTurn {
+        /// The prompt row, once its (optimistic) echo is laid out.
+        var key: UInt64?
+        /// User rows that existed at send time (the new one is the prompt).
+        var before: Set<UInt64>
+    }
+    private var ownTurn: OwnTurn?
+    /// Content height the runway holds (nil: the frame's own height).
+    private var runwayHeight: CGFloat?
+    /// Desktop OWN_SEND_GLIDE_RETAIN: 15% of the remaining glide per 60 fps
+    /// frame (~90% in ~230 ms), ease-out.
+    private static let glideRetain: Double = 0.85
+
+    /// Reserve the reply's space below the prompt about to be sent (every
+    /// immediate send; queued sends keep the live turn's runway).
+    func beginOwnTurn() {
+        var before = Set<UInt64>()
+        if let frame = current {
+            let n = frame.rowCount()
+            for i in stride(from: Int(n) - 1, through: max(0, Int(n) - 24), by: -1) {
+                if let p = frame.placement(index: UInt32(i)), p.kind == .user { before.insert(p.key) }
+            }
+        }
+        ownTurn = OwnTurn(key: nil, before: before)
+        setFollowing(true)
+    }
+
+    /// Resolve the prompt row and the height the runway holds for `frame`.
+    private func contentHeight(for frame: LayoutFrame) -> CGFloat {
+        let natural = CGFloat(frame.totalHeight())
+        guard var turn = ownTurn else {
+            runwayHeight = nil
+            return natural
+        }
+        if turn.key == nil {
+            let n = Int(frame.rowCount())
+            for i in stride(from: n - 1, through: max(0, n - 12), by: -1) {
+                if let p = frame.placement(index: UInt32(i)), p.kind == .user, !turn.before.contains(p.key) {
+                    turn.key = p.key
+                    break
+                }
+            }
+            ownTurn = turn
+        }
+        guard let key = turn.key, let i = frame.indexOf(key: key), let p = frame.placement(index: i) else {
+            // Echo not laid out yet: hold still (desktop returns early too).
+            return max(natural, runwayHeight ?? 0)
+        }
+        // Hold offset puts the prompt row (its turn gap included) at the top of
+        // the visible area; the reservation makes that the max offset.
+        let hold = CGFloat(p.y) - adjustedContentInset.top
+        let minimum = hold + bounds.height - adjustedContentInset.bottom
+        if natural >= minimum - 0.5 {
+            // Filled: the ordinary tail follow takes over. The anchor stays for
+            // the turn, so if the viewport grows past the reply again (the
+            // keyboard going away) the space is reserved again instead of the
+            // prompt dropping back down.
+            runwayHeight = nil
+            return natural
+        }
+        runwayHeight = minimum
+        return minimum
+    }
+
+    /// The composer's inset changes with the keyboard: resize the runway in
+    /// the same pass, so "the bottom" stays the held position (otherwise the
+    /// prompt dipped and glided back).
+    override var contentInset: UIEdgeInsets {
+        didSet { if contentInset != oldValue { refreshRunway() } }
+    }
+
+    /// Insets / viewport changed (keyboard, rotation): re-size the runway.
+    private func refreshRunway() {
+        guard ownTurn != nil, let frame = current else { return }
+        let height = contentHeight(for: frame)
+        if abs(contentSize.height - height) > 0.5 {
+            contentSize = CGSize(width: bounds.width, height: height)
+            if following, !isTracking { startSpring() }
+        }
+    }
+
     /// A disclosure the user just toggled: its next height change tweens with
     /// the desktop fold (140 ms ease-out).
     private var pendingFold: UInt64?
@@ -87,6 +177,7 @@ final class TranscriptListView: UIScrollView, RowViewDelegate, UIScrollViewDeleg
             engine.setViewport(width: Float(bounds.width), textScale: Float(scale))
         }
         layoutRows()
+        refreshRunway()
         reportDistance()
     }
 
@@ -187,7 +278,7 @@ final class TranscriptListView: UIScrollView, RowViewDelegate, UIScrollViewDeleg
             ToolRailView.quietUntil = CACurrentMediaTime() + 0.8
         }
         let animation = rowAnimation(old: old, new: frame)
-        let height = CGFloat(frame.totalHeight())
+        let height = contentHeight(for: frame)
         if contentSize.height != height || contentSize.width != bounds.width {
             contentSize = CGSize(width: bounds.width, height: height)
         }
@@ -402,8 +493,14 @@ final class TranscriptListView: UIScrollView, RowViewDelegate, UIScrollViewDeleg
             contentOffset.y = target
             return stopSpring()
         }
-        // Critically damped approach: feels like the tail "settles" into place.
-        contentOffset.y += delta * CGFloat(1 - exp(-dt * 16))
+        if runwayHeight != nil {
+            // Runway glide: the desktop's frame-rate-independent ease-out.
+            let frames = min(8, dt / (1.0 / 60))
+            contentOffset.y += delta * CGFloat(1 - pow(Self.glideRetain, frames))
+        } else {
+            // Critically damped approach: feels like the tail "settles" into place.
+            contentOffset.y += delta * CGFloat(1 - exp(-dt * 16))
+        }
     }
 
     /// The first user message bubble currently laid out (handoff target).

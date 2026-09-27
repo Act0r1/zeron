@@ -43,7 +43,11 @@ final class SessionViewController: UIViewController, UIGestureRecognizerDelegate
         list.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         list.accessibilityIdentifier = "transcript"
         list.imageLoader = { [weak self] ref, iv in self?.source.loadImage(ref, into: iv) }
-        list.onDistanceFromBottom = { [weak self] d in self?.setJumpVisible(d > 140) }
+        // Hidden while following (the runway glide and tail spring travel).
+        list.onDistanceFromBottom = { [weak self] d in
+            guard let self else { return }
+            self.setJumpVisible(d > 140 && !self.list.following)
+        }
         view.addSubview(list)
         // Tapping the transcript puts the composer (and keyboard) away.
         let dismissTap = UITapGestureRecognizer(target: self, action: #selector(dismissComposer))
@@ -64,8 +68,12 @@ final class SessionViewController: UIViewController, UIGestureRecognizerDelegate
                 self.endEdit(commit: text)
                 return
             }
+            // An immediate send (new turn, steer, stop-and-send) gets the
+            // desktop runway; a message queued behind a live turn keeps the
+            // live turn's runway and just follows.
+            let queued = self.shown.running && mode == .queue
             self.source.send(text: text, images: images, mode: mode)
-            self.list.scrollToBottom(animated: true)
+            if queued { self.list.scrollToBottom(animated: true) } else { self.list.beginOwnTurn() }
         }
         composer.onStop = { [weak self] in self?.source.stop() }
         composer.text = Drafts.load(chatId)
@@ -213,6 +221,7 @@ final class SessionViewController: UIViewController, UIGestureRecognizerDelegate
     /// Content hidden, composer focused so the keyboard never drops.
     func prepareArrival() {
         loadViewIfNeeded()
+        list.beginOwnTurn()
         list.alpha = 0
         bottom.alpha = 0
         composer.becomeFirstResponder()
