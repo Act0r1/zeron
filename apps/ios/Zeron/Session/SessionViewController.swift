@@ -57,13 +57,13 @@ final class SessionViewController: UIViewController, UIGestureRecognizerDelegate
         dismissTap.delegate = self
         list.addGestureRecognizer(dismissTap)
         setContentScrollView(list, for: .top)
-        // Our own top fade instead of the system edge effect: the nav bar
-        // only attaches that once a push has finished, so opening a session
-        // showed the transcript under the title, unfaded, for the whole
-        // transition before the fade snapped in. The overlay is there from
-        // the first frame (and matches the bottom fade).
-        list.topEdgeEffect.isHidden = true
+        list.topEdgeEffect.style = .soft
         list.bottomEdgeEffect.isHidden = true
+        // The system edge effect (the soft blur under the bar) doesn't render
+        // while a push is running: opening a session showed the transcript
+        // under the title, crisp, for the whole transition, then the effect
+        // snapped in. A plain fade covers the transition and dissolves into
+        // the system effect once it's on (viewDidAppear).
         // Solid behind the bar (nothing reads through the title), easing
         // out just below it.
         topFade.fadeLength = 40
@@ -226,6 +226,16 @@ final class SessionViewController: UIViewController, UIGestureRecognizerDelegate
         super.viewDidAppear(animated)
         hasAppeared = true
         (splitViewController as? SplitRootController)?.sessionDidAppear(chatId)
+        // The system edge effect is on now (it doesn't render mid-push):
+        // hand over from the transition's fade.
+        list.settleEdgeEffect()
+        if !topFade.isHidden {
+            UIView.animate(withDuration: 0.2, delay: 0, options: [.curveEaseOut, .allowUserInteraction]) {
+                self.topFade.alpha = 0
+            } completion: { _ in
+                self.topFade.isHidden = true
+            }
+        }
         (tabBarController as? MainTabController)?.syncAccessory()
     }
 
