@@ -119,7 +119,7 @@ pub(crate) enum Gap {
 
 pub(crate) mod geom {
     pub const MARGIN_X: f32 = 18.0;
-    /// t3code's message column (max-w 768).
+    /// The message column's width cap on wide screens (iPad, landscape).
     pub const READING_WIDTH: f32 = 768.0;
     pub const GAP_FIRST: f32 = 14.0;
     pub const GAP_TURN: f32 = 30.0;

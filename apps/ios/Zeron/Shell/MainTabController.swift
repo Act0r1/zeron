@@ -21,10 +21,10 @@ final class MainTabController: UITabBarController, UITabBarControllerDelegate, A
         tabBar.tintColor = Palette.text
         tabBarMinimizeBehavior = .onScrollDown
 
-        let sessions = UITab(title: "Sessions", image: UIImage(systemName: "bubble.left.and.text.bubble.right"), identifier: "sessions") { [app] _ in
+        let sessions = UITab(title: "Sessions", image: UIImage(named: "tab-chat"), identifier: "sessions") { [app] _ in
             Self.nav(SessionsViewController(app: app))
         }
-        let more = UITab(title: "Settings", image: UIImage(systemName: "gearshape"), identifier: "more") { [app] _ in
+        let more = UITab(title: "Settings", image: UIImage(named: "tab-settings"), identifier: "more") { [app] _ in
             Self.nav(MoreViewController(app: app))
         }
         let search = UISearchTab { [app] _ in

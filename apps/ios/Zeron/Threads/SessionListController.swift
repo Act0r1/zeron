@@ -19,8 +19,6 @@ class SessionListController: UIViewController, UICollectionViewDelegate {
     private var token: AnyObject?
     /// Show drag handles in edit mode (Pinned).
     var reorderable = false
-    /// t3-style three-line card rows (iPad sidebar).
-    var sidebarRows = false
     /// The session open beside this list (iPad sidebar): drawn as current.
     var currentChatId: String? {
         didSet {
@@ -60,7 +58,6 @@ class SessionListController: UIViewController, UICollectionViewDelegate {
 
         let sessionReg = UICollectionView.CellRegistration<SessionCell, String> { [weak self] cell, path, id in
             guard let self, let vm = self.sessions[id] else { return }
-            cell.sidebarStyle = self.sidebarRows
             cell.configure(vm)
             cell.isCurrent = id == self.currentChatId
             cell.accessories = self.reorderable ? [.reorder(displayed: .whenEditing)] : []
@@ -315,22 +312,19 @@ class SessionListController: UIViewController, UICollectionViewDelegate {
 /// sections inline as foldable groups, then everything else under Recent.
 /// Fold state persists; long-press a header for its actions.
 class SessionsViewController: SessionListController {
-    /// Sidebar search (iPad): non-empty shows matches instead of sections.
+    /// Search from the iPad sidebar: non-empty shows matches instead of sections.
     var query = "" { didSet { if query != oldValue { reload(animated: true) } } }
 
-    /// The chat wallpaper behind the top of the front page (phone shell; the
-    /// iPad sidebar reuses this list without it). Fixed behind the list,
-    /// fading out as the list scrolls up over it.
+    /// The chat wallpaper behind the top of the front page. Fixed behind the
+    /// list, fading out as the list scrolls up over it.
     private let wallpaper = WallpaperView()
 
     override func viewDidLoad() {
         collapsible = true
         super.viewDidLoad()
-        if !sidebarRows {
-            let backdrop = UIView()
-            backdrop.addSubview(wallpaper)
-            collectionView.backgroundView = backdrop
-        }
+        let backdrop = UIView()
+        backdrop.addSubview(wallpaper)
+        collectionView.backgroundView = backdrop
         title = "Sessions"
         navigationItem.largeTitleDisplayMode = .always
         navigationItem.rightBarButtonItem = UIBarButtonItem(image: UIImage(systemName: "ellipsis"), menu: optionsMenu())
@@ -350,13 +344,11 @@ class SessionsViewController: SessionListController {
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        guard !sidebarRows else { return }
         // Desktop hero: 72% of the viewport, at most 760pt.
         wallpaper.frame = CGRect(x: 0, y: 0, width: view.bounds.width, height: min(view.bounds.height * 0.72, 760))
     }
 
     override func listDidScroll(_ scrollView: UIScrollView) {
-        guard !sidebarRows else { return }
         let travel = scrollView.contentOffset.y + scrollView.adjustedContentInset.top
         wallpaper.scrollFade = 1 - max(0, travel) / max(1, wallpaper.bounds.height * 0.6)
     }

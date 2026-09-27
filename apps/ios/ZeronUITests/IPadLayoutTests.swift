@@ -1,6 +1,6 @@
 import XCTest
 
-/// The iPad split shell (t3code layout): sidebar beside the session column.
+/// The iPad split shell: the phone UI with a sidebar beside the session column.
 final class IPadLayoutTests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
@@ -24,7 +24,7 @@ final class IPadLayoutTests: XCTestCase {
     func testSidebarOpensSessionsBesideIt() {
         XCUIDevice.shared.orientation = .landscapeLeft
         let app = launch()
-        // Launch lands on a new-session draft beside the sidebar (t3).
+        // Launch lands on the new-session page beside the sidebar.
         let input = app.textViews["composer-input"]
         XCTAssertTrue(input.waitForExistence(timeout: 10))
         snapshot(app, "ipad-draft-landscape")
@@ -47,10 +47,9 @@ final class IPadLayoutTests: XCTestCase {
         XCUIDevice.shared.orientation = .landscapeLeft
         let app = launch(["-route", "chat:chat-deploy"])
         XCTAssertTrue(app.scrollViews["transcript"].waitForExistence(timeout: 10))
-        app.buttons["sidebar-new-session"].tap()
+        app.buttons["new-session"].tap()
         let input = app.textViews["composer-input"]
         XCTAssertTrue(input.waitForExistence(timeout: 5))
-        input.tap()
         input.typeText("Add a dark mode toggle to settings")
         app.buttons["composer-send"].tap()
         XCTAssertTrue(app.scrollViews["transcript"].waitForExistence(timeout: 10), "the new session opens in the main column")

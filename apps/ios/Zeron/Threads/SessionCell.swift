@@ -56,17 +56,8 @@ final class SessionCell: UICollectionViewListCell {
     private let status = StatusGlyph()
     private let prBadge = PRBadgeView()
     private var vm: SessionRowVM?
-    /// The session open beside the sidebar (iPad): t3's active-row fill.
+    /// The session open beside the sidebar (iPad): a quiet fill.
     var isCurrent = false { didSet { if isCurrent != oldValue { setNeedsUpdateConfiguration() } } }
-    /// iPad sidebar card (t3's thread row): project + status, then the title
-    /// at full width, then branch + PR badge + harness.
-    ///
-    ///   [P] project ··················· ⠿ Working
-    ///   Title of the session, full width
-    ///   ⎇ branch ······················ ⎇ 412  ✳︎
-    var sidebarStyle = false
-    private let projectLabel = FadingLabel()
-    static var sidebarHeight: CGFloat { (76 * TypeScale.factor).rounded() }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -74,7 +65,7 @@ final class SessionCell: UICollectionViewListCell {
         time.textAlignment = .right
         harness.contentMode = .scaleAspectFit
         harness.tintColor = Palette.text
-        for v in [harness, title, projectTile, projectLabel, meta, time, status, prBadge] as [UIView] { contentView.addSubview(v) }
+        for v in [harness, title, projectTile, meta, time, status, prBadge] as [UIView] { contentView.addSubview(v) }
         var bg = UIBackgroundConfiguration.listCell()
         bg.backgroundColor = .clear
         backgroundConfiguration = bg
@@ -85,16 +76,14 @@ final class SessionCell: UICollectionViewListCell {
     override func updateConfiguration(using state: UICellConfigurationState) {
         var bg = UIBackgroundConfiguration.listCell().updated(for: state)
         bg.backgroundColor = state.isHighlighted || state.isSelected ? Palette.controlFill : isCurrent ? Palette.rowActive : .clear
-        bg.cornerRadius = sidebarStyle ? 10 : 16
-        bg.backgroundInsets = sidebarStyle
-            ? NSDirectionalEdgeInsets(top: 1, leading: 6, bottom: 1, trailing: 6)
-            : NSDirectionalEdgeInsets(top: 1, leading: 8, bottom: 1, trailing: 8)
+        bg.cornerRadius = 16
+        bg.backgroundInsets = NSDirectionalEdgeInsets(top: 1, leading: 8, bottom: 1, trailing: 8)
         backgroundConfiguration = bg
     }
 
     /// Fixed height: skip Auto Layout self-sizing entirely.
     override func preferredLayoutAttributesFitting(_ attrs: UICollectionViewLayoutAttributes) -> UICollectionViewLayoutAttributes {
-        attrs.size.height = sidebarStyle ? Self.sidebarHeight : Self.height
+        attrs.size.height = Self.height
         return attrs
     }
 
@@ -113,19 +102,12 @@ final class SessionCell: UICollectionViewListCell {
 
     func configure(_ vm: SessionRowVM) {
         self.vm = vm
-        harness.image = BrandMarks.image(for: vm.harness ?? "claude-code", side: sidebarStyle ? 13 : 20)
+        harness.image = BrandMarks.image(for: vm.harness ?? "claude-code", side: 20)
         title.text = vm.title
         title.font = Fonts.ui(vm.unseen ? .sansSemibold : .sansMedium, TypeScale.size(16.5))
         title.textColor = vm.unseen || vm.status != .idle ? Palette.text : Palette.text.withAlphaComponent(0.88)
         projectTile.configure(name: vm.hasProject ? vm.projectName : "Home", colorIndex: vm.colorIndex)
-        projectLabel.isHidden = !sidebarStyle
-        projectLabel.text = vm.projectName
-        projectLabel.font = Fonts.ui(.sansMedium, TypeScale.size(12.5))
-        projectLabel.textColor = Palette.secondary
-        if sidebarStyle {
-            title.font = Fonts.ui(vm.unseen ? .sansSemibold : .sansMedium, TypeScale.size(14.5))
-        }
-        let metaText = sidebarStyle ? NSMutableAttributedString() : NSMutableAttributedString(string: vm.projectName, attributes: [.font: Fonts.ui(.sans, TypeScale.size(13.5)), .foregroundColor: Palette.secondary])
+        let metaText = NSMutableAttributedString(string: vm.projectName, attributes: [.font: Fonts.ui(.sans, TypeScale.size(13.5)), .foregroundColor: Palette.secondary])
         if let b = vm.branch, !b.isEmpty, let icon = BranchIcon.image?.withTintColor(Palette.subline, renderingMode: .alwaysOriginal) {
             // Desktop line 3: git-branch icon + branch in the subline tone.
             let font = Fonts.ui(.sans, TypeScale.size(12.5))
@@ -147,13 +129,13 @@ final class SessionCell: UICollectionViewListCell {
         if let corner {
             time.text = corner.word
             time.textColor = corner.color
-            time.font = Fonts.ui(.sansMedium, TypeScale.size(sidebarStyle ? 12 : 13))
+            time.font = Fonts.ui(.sansMedium, TypeScale.size(13))
             status.kind = corner.glyph
             status.isHidden = false
         } else {
             time.text = vm.timeLabel
             time.textColor = StatusTone.time
-            time.font = Fonts.ui(.sansMedium, TypeScale.size(sidebarStyle ? 12 : 13))
+            time.font = Fonts.ui(.sansMedium, TypeScale.size(13))
             status.kind = .none
             status.isHidden = true
         }
@@ -164,7 +146,6 @@ final class SessionCell: UICollectionViewListCell {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        if sidebarStyle { return layoutSidebar() }
         let b = contentView.bounds
         let left: CGFloat = 20
         let right: CGFloat = 20
@@ -201,41 +182,6 @@ final class SessionCell: UICollectionViewListCell {
     static func xHeightCenter(_ font: UIFont, top: CGFloat, height: CGFloat) -> CGFloat {
         let baseline = top + (height - font.lineHeight) / 2 + font.ascender
         return (baseline - font.xHeight / 2).rounded()
-    }
-
-    private func layoutSidebar() {
-        let b = contentView.bounds
-        let k = TypeScale.factor
-        let left: CGFloat = 16, right: CGFloat = 16
-        // Line 1: project tile + name, status/time at the right.
-        let l1 = (9 * k).rounded(), l1h = (18 * k).rounded()
-        let tile = (14 * k).rounded()
-        projectTile.frame = CGRect(x: left, y: Self.xHeightCenter(Fonts.ui(.sansMedium, TypeScale.size(12.5)), top: l1, height: l1h) - tile / 2, width: tile, height: tile)
-        let tw = ceil(time.sizeThatFits(CGSize(width: 140, height: 40)).width)
-        time.frame = CGRect(x: b.width - right - tw, y: l1, width: tw, height: l1h)
-        var trailing = time.frame.minX - 8
-        if !status.isHidden {
-            status.frame = CGRect(x: time.frame.minX - 4 - 12, y: l1 + l1h / 2 - 6, width: 12, height: 12)
-            trailing = status.frame.minX - 8
-        }
-        let px = left + tile + 7
-        projectLabel.frame = CGRect(x: px, y: l1, width: max(0, trailing - px), height: l1h)
-        // Line 2: the title, full width.
-        let l2 = l1 + l1h + (3 * k).rounded(), l2h = (21 * k).rounded()
-        title.frame = CGRect(x: left, y: l2, width: max(0, b.width - left - right), height: l2h)
-        // Line 3: branch, then PR badge + harness mark at the right.
-        let l3 = l2 + l2h + (3 * k).rounded(), l3h = (16 * k).rounded()
-        var r = b.width - right
-        let hs = (13 * k).rounded()
-        harness.isHidden = harness.image == nil
-        harness.frame = CGRect(x: r - hs, y: l3 + (l3h - hs) / 2, width: hs, height: hs)
-        r = harness.frame.minX - 8
-        if !prBadge.isHidden {
-            let size = prBadge.intrinsicContentSize
-            prBadge.frame = CGRect(x: r - size.width, y: l3 + (l3h - size.height) / 2, width: size.width, height: size.height)
-            r = prBadge.frame.minX - 8
-        }
-        meta.frame = CGRect(x: left, y: l3, width: max(0, r - left), height: l3h)
     }
 }
 

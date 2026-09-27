@@ -53,10 +53,14 @@ final class NewSessionViewController: UIViewController, UIGestureRecognizerDeleg
 
     /// Embedded in the iPad split's main column (no sheet chrome).
     private let embedded: Bool
+    /// Take the keyboard on appearing. The sheet always does; the iPad column
+    /// only when opened on purpose (not the launch page).
+    var focusOnAppear: Bool
 
     init(app: AppModel, prompt: String?, embedded: Bool = false, onCreated: @escaping (String, DraftHandoff?) -> Void) {
         self.app = app
         self.embedded = embedded
+        self.focusOnAppear = !embedded
         self.onCreated = onCreated
         self.draft = app.lastDraft
         super.init(nibName: nil, bundle: nil)
@@ -73,7 +77,7 @@ final class NewSessionViewController: UIViewController, UIGestureRecognizerDeleg
         dismissTap.delegate = self
         view.addGestureRecognizer(dismissTap)
         view.backgroundColor = Palette.background
-        title = embedded ? nil : "New Session"
+        title = "New Session"
         if !embedded {
             navigationItem.leftBarButtonItem = UIBarButtonItem(systemItem: .close, primaryAction: UIAction { [weak self] _ in
                 self?.dismiss(animated: true)
@@ -111,64 +115,71 @@ final class NewSessionViewController: UIViewController, UIGestureRecognizerDeleg
         composer.onSend = { [weak self] text, images, _ in self?.create(text: text, images: images) }
         view.addSubview(composer)
         heroStack.leadingAnchor.constraint(greaterThanOrEqualTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 24).isActive = true
-        if embedded {
-            // iPad draft (t3): the composer sits mid-column at the message
-            // width (768pt), the headline 32pt above it; the keyboard pushes
-            // it up.
-            let centered = composer.centerYAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerYAnchor, constant: 40)
-            centered.priority = .defaultHigh
-            let fill = composer.widthAnchor.constraint(equalTo: view.safeAreaLayoutGuide.widthAnchor, constant: -40)
-            fill.priority = .defaultHigh
-            hero.font = Fonts.ui(.sansSemibold, 28)
-            NSLayoutConstraint.activate([
-                composer.centerXAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerXAnchor),
-                composer.widthAnchor.constraint(lessThanOrEqualToConstant: 768),
-                fill,
-                centered,
-                composer.bottomAnchor.constraint(lessThanOrEqualTo: view.keyboardLayoutGuide.topAnchor, constant: -16),
-                heroStack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-                heroStack.bottomAnchor.constraint(equalTo: composer.topAnchor, constant: -32),
-            ])
-        } else {
-            // The headline lives in the free space above the composer — from
-            // the top of the sheet to the composer's top edge — centered there,
-            // so it's always above the composer (keyboard up or down, one line
-            // or two).
-            let free = UILayoutGuide()
-            view.addLayoutGuide(free)
-            heroStack.setContentCompressionResistancePriority(.required, for: .vertical)
-            NSLayoutConstraint.activate([
-                free.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
-                free.bottomAnchor.constraint(equalTo: composer.topAnchor, constant: -20),
-                free.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-                free.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-                heroStack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-                heroStack.centerYAnchor.constraint(equalTo: free.centerYAnchor),
-                heroStack.topAnchor.constraint(greaterThanOrEqualTo: free.topAnchor),
-                heroStack.bottomAnchor.constraint(lessThanOrEqualTo: free.bottomAnchor),
-                composer.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 12),
-                composer.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -12),
-                composer.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor, constant: -8),
-            ])
-        }
+        // The headline lives in the free space above the composer — from the
+        // top of the page to the composer's top edge — centered there, so
+        // it's always above the composer (keyboard up or down, one line or
+        // two). On iPad the composer keeps the transcript's reading width.
+        let free = UILayoutGuide()
+        view.addLayoutGuide(free)
+        heroStack.setContentCompressionResistancePriority(.required, for: .vertical)
+        let fill = composer.widthAnchor.constraint(equalTo: view.safeAreaLayoutGuide.widthAnchor, constant: -24)
+        fill.priority = .defaultHigh
+        NSLayoutConstraint.activate([
+            free.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            free.bottomAnchor.constraint(equalTo: composer.topAnchor, constant: -20),
+            free.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            free.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            heroStack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            heroStack.centerYAnchor.constraint(equalTo: free.centerYAnchor),
+            heroStack.topAnchor.constraint(greaterThanOrEqualTo: free.topAnchor),
+            heroStack.bottomAnchor.constraint(lessThanOrEqualTo: free.bottomAnchor),
+            composer.centerXAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerXAnchor),
+            composer.leadingAnchor.constraint(greaterThanOrEqualTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 12),
+            composer.widthAnchor.constraint(lessThanOrEqualToConstant: 768),
+            fill,
+            composer.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor, constant: -8),
+        ])
         if draft.projectId == nil, draft.hostId == nil { draft.projectId = app.projectOptions.first?.id }
         if draft.projectId == nil, draft.hostId == nil {
             // No projects yet: run on the first reachable host.
             draft.hostId = app.hostOptions.first(where: \.online)?.id ?? app.hostOptions.first?.id
         }
+        loadModels()
+    }
+
+    /// The last catalog each host reported, so the chip opens on a real model
+    /// name while a fresh one comes back over the relay.
+    private static var modelCache: [String: [ModelChoice]] = [:]
+    private var modelsDevice: String?
+
+    /// Models for the draft's host: cached (or the built-in catalog) at once,
+    /// then the host's own list.
+    private func loadModels() {
+        let device = deviceId
+        guard device != modelsDevice else { return refreshChips() }
+        modelsDevice = device
+        models = Self.modelCache[device] ?? Self.catalogModels()
         refreshChips()
         Task { [weak self] in
             guard let self else { return }
-            self.models = await self.app.models(for: self.deviceId)
+            let fresh = await self.app.models(for: device)
+            guard !fresh.isEmpty else { return }
+            Self.modelCache[device] = fresh
+            guard self.modelsDevice == device else { return }
+            self.models = fresh
             self.refreshChips()
+        }
+    }
+
+    private static func catalogModels() -> [ModelChoice] {
+        fallbackHarnesses().filter(\.offered).flatMap { h in
+            fallbackModels(harness: h.id).map { ModelChoice(harness: h.id, harnessLabel: h.label, id: $0.id, label: $0.label, efforts: $0.reasoningLevels) }
         }
     }
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        // The sheet focuses at once; the iPad draft waits for a tap (its
-        // on-screen keyboard would cover half the column).
-        if !embedded { composer.becomeFirstResponder() }
+        if focusOnAppear { composer.becomeFirstResponder() }
     }
 
     override func viewDidLayoutSubviews() {
@@ -203,7 +214,10 @@ final class NewSessionViewController: UIViewController, UIGestureRecognizerDeleg
             chips.append(ComposerChip(id: "host", title: host?.name ?? "Choose host", symbol: "desktopcomputer"))
         }
         let model = models.first { $0.harness == draft.harness && $0.id == draft.model } ?? models.first { $0.harness == draft.harness }
-        chips.append(ComposerChip(id: "model", title: model?.label ?? HarnessNames.label(draft.harness), symbol: nil, icon: BrandMarks.image(for: draft.harness, side: 13)))
+        // Never the harness name in place of a model: a model this host
+        // hasn't listed still gets its catalog label.
+        let modelTitle = model?.label ?? draft.model.map { modelLabel(harness: draft.harness, model: $0) } ?? fallbackModels(harness: draft.harness).first?.label ?? HarnessNames.label(draft.harness)
+        chips.append(ComposerChip(id: "model", title: modelTitle, symbol: nil, icon: BrandMarks.image(for: draft.harness, side: 13)))
         if let efforts = model?.efforts, !efforts.isEmpty {
             chips.append(ComposerChip(id: "effort", title: (draft.effort ?? efforts[efforts.count / 2]).capitalized, symbol: "gauge.with.dots.needle.67percent"))
         }
@@ -216,8 +230,6 @@ final class NewSessionViewController: UIViewController, UIGestureRecognizerDeleg
             "effort": { [weak self] in self?.effortMenu() },
         ]
         mark.image = BrandMarks.image(for: draft.harness, side: 34)
-        // t3's draft headline names the project.
-        hero.text = project.map { "What should we build in \($0.name)?" } ?? "What are we building?"
     }
 
     private func projectMenu() -> UIMenu {
@@ -230,7 +242,7 @@ final class NewSessionViewController: UIViewController, UIGestureRecognizerDeleg
                     self?.draft.projectId = p.id
                     self?.draft.hostId = nil
                     self?.draft.branch = nil
-                    self?.refreshChips()
+                    self?.loadModels()
                 }
             })
         }
@@ -239,7 +251,7 @@ final class NewSessionViewController: UIViewController, UIGestureRecognizerDeleg
                 guard let self else { return }
                 self.draft.projectId = nil
                 self.draft.hostId = self.draft.hostId ?? self.app.hostOptions.first(where: \.online)?.id ?? self.app.hostOptions.first?.id
-                self.refreshChips()
+                self.loadModels()
             },
             UIAction(title: "New Project…", image: UIImage(systemName: "folder.badge.plus")) { [weak self] _ in
                 guard let self else { return }
@@ -248,7 +260,7 @@ final class NewSessionViewController: UIViewController, UIGestureRecognizerDeleg
                     self?.draft.projectId = id
                     self?.draft.hostId = nil
                     self?.draft.branch = nil
-                    self?.refreshChips()
+                    self?.loadModels()
                 }
                 self.present(UINavigationController(rootViewController: vc), animated: true)
             },
@@ -260,7 +272,7 @@ final class NewSessionViewController: UIViewController, UIGestureRecognizerDeleg
         UIMenu(title: "Run on", children: app.hostOptions.map { h in
             UIAction(title: h.name, subtitle: h.online ? "Online" : "Offline", image: UIImage(systemName: "desktopcomputer"), state: h.id == draft.hostId ? .on : .off) { [weak self] _ in
                 self?.draft.hostId = h.id
-                self?.refreshChips()
+                self?.loadModels()
             }
         })
     }

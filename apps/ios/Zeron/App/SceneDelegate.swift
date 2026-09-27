@@ -53,7 +53,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
     private func showRoot(animated: Bool) {
         guard let window else { return }
-        // iPad gets the t3-style split shell (it collapses to the tab shell
+        // iPad gets the split shell (it collapses to the tab shell
         // at compact widths); iPhone the tab shell directly.
         let root: UIViewController = !app.isSignedIn
             ? SignInViewController(app: app)

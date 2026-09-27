@@ -228,6 +228,15 @@ final class SessionFlowTests: XCTestCase {
         XCTAssertEqual(app.state, .runningForeground)
     }
 
+    /// Regression: the model chip read "Claude Code" (the harness) until the
+    /// host's model list came back over the relay.
+    func testModelChipNamesAModelAtOnce() {
+        let app = launch(["-route", "new"])
+        let chip = app.buttons["composer-chip-model"]
+        XCTAssertTrue(chip.waitForExistence(timeout: 10))
+        XCTAssertFalse(chip.label.contains("Claude Code"), "chip shows a model, got \(chip.label)")
+    }
+
     func testEffortPickerInNewSession() {
         let app = launch(["-route", "new"])
         let chip = app.buttons["composer-chip-effort"]
@@ -397,7 +406,7 @@ final class SessionFlowTests: XCTestCase {
 
     /// Wallpaper controls in Settings: effect + remove appear once one is set.
     func testWallpaperSettings() throws {
-        let path = "/tmp/wall-tahoe.png"
+        let path = "/tmp/wall-test.png"
         try XCTSkipUnless(FileManager.default.fileExists(atPath: path), "needs a host image at \(path)")
         let app = launch(["-wallpaper", path, "-wallpaper-effect", "halftone", "-route", "more"])
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 10))
@@ -415,15 +424,10 @@ final class SessionFlowTests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Effect"].exists)
     }
 
-    /// The new-session headline stays above the composer, keyboard up, with
-    /// a project whose name wraps it onto two lines.
+    /// The new-session headline stays above the composer, keyboard up.
     func testNewSessionHeadlineStaysAboveComposer() {
         let app = launch(["-route", "new"])
-        let chip = app.buttons["composer-chip-project"]
-        XCTAssertTrue(chip.waitForExistence(timeout: 10))
-        chip.tap()
-        app.buttons["Zeron iOS"].firstMatch.tap()
-        let hero = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'What should we build in'")).firstMatch
+        let hero = app.staticTexts["What are we building?"]
         XCTAssertTrue(hero.waitForExistence(timeout: 5))
         app.textViews["composer-input"].tap()
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))

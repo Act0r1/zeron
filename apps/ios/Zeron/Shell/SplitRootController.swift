@@ -9,12 +9,11 @@ protocol AppRouter: AnyObject {
     func showSearch()
 }
 
-/// iPad shell, laid out like t3code: a 256pt sidebar (208–320) beside the
-/// session column. The sidebar is the front page — sessions in sidebar
-/// sections, search, new session, settings; the main column shows the open
-/// session or a new-session draft (t3 opens a draft rather than an empty
-/// page). Compact widths (Slide Over, narrow Split View) collapse to the
-/// iPhone tab shell.
+/// iPad shell: Zeron mobile with a sidebar. The sidebar is the phone's
+/// Sessions page (same rows, sections, wallpaper, "New session" capsule);
+/// the main column shows the open session or the phone's new-session page.
+/// Compact widths (Slide Over, narrow Split View) collapse to the iPhone tab
+/// shell.
 final class SplitRootController: UISplitViewController, UISplitViewControllerDelegate, AppRouter {
     private let app: AppModel
     private let sidebar: SidebarViewController
@@ -36,20 +35,19 @@ final class SplitRootController: UISplitViewController, UISplitViewControllerDel
         delegate = self
         preferredDisplayMode = .oneBesideSecondary
         preferredSplitBehavior = .tile
-        preferredPrimaryColumnWidth = 256
-        minimumPrimaryColumnWidth = 208
-        maximumPrimaryColumnWidth = 320
+        // About a phone's width, so the rows read as they do on iPhone.
+        preferredPrimaryColumnWidth = 360
+        minimumPrimaryColumnWidth = 320
+        maximumPrimaryColumnWidth = 400
         primaryBackgroundStyle = .none
-        displayModeButtonVisibility = .automatic
-        let sidebarNav = UINavigationController(rootViewController: sidebar)
-        sidebarNav.navigationBar.titleTextAttributes = [.font: Fonts.ui(.sansSemibold, 15), .foregroundColor: Palette.text]
-        sidebarNav.navigationBar.tintColor = Palette.text
-        setViewController(sidebarNav, for: .primary)
-        detail.navigationBar.titleTextAttributes = [.font: Fonts.ui(.sansSemibold, 15), .foregroundColor: Palette.text]
+        // No toggle button (the phone has none); ⌘B still hides the sidebar.
+        displayModeButtonVisibility = .never
+        setViewController(sidebar, for: .primary)
+        detail.navigationBar.titleTextAttributes = [.font: Fonts.ui(.sansSemibold, 17), .foregroundColor: Palette.text]
         detail.navigationBar.tintColor = Palette.text
         setViewController(detail, for: .secondary)
         setViewController(tabs, for: .compact)
-        presentNewSession(prompt: nil)
+        showDraft(prompt: nil, focus: false)
     }
 
     override var keyCommands: [UIKeyCommand]? {
@@ -81,6 +79,12 @@ final class SplitRootController: UISplitViewController, UISplitViewControllerDel
 
     func presentNewSession(prompt: String?) {
         guard !isCollapsed else { return tabs.presentNewSession(prompt: prompt) }
+        showDraft(prompt: prompt, focus: true)
+    }
+
+    /// The new-session page in the main column. Launch shows it without the
+    /// keyboard (it would cover half the column); asking for one focuses it.
+    func showDraft(prompt: String?, focus: Bool) {
         currentChatId = nil
         sidebar.currentChatId = nil
         let draft = NewSessionViewController(app: app, prompt: prompt, embedded: true) { [weak self] chatId, handoff in
@@ -100,6 +104,7 @@ final class SplitRootController: UISplitViewController, UISplitViewControllerDel
             }
             DraftHandoffAnimator.run(handoff, into: session, window: window)
         }
+        draft.focusOnAppear = focus
         detail.setViewControllers([draft], animated: false)
     }
 
@@ -130,16 +135,18 @@ final class SplitRootController: UISplitViewController, UISplitViewControllerDel
     }
 }
 
-/// The iPad sidebar: wordmark, search + new session, the front-page
-/// sections (current session highlighted), and a footer of settings /
-/// archive — t3code's sidebar shape with Zeron's sections.
-final class SidebarViewController: UIViewController, UISearchTextFieldDelegate {
+/// The iPad sidebar: the phone's Sessions page in its own navigation stack
+/// (sections, folders, Archived push inside it), search in the bar, Settings
+/// beside the options menu, and the "New session" capsule floating at the
+/// bottom as the tab bar's accessory does on iPhone.
+final class SidebarViewController: UIViewController, UISearchResultsUpdating {
     private let app: AppModel
     private let list: SessionsViewController
-    private let search = UISearchTextField()
-    private let footer = UIStackView()
+    private let nav: UINavigationController
+    private let search = UISearchController(searchResultsController: nil)
+    private let capsule = Glass.surface(interactive: true)
+    private lazy var accessory = AskAnythingAccessory { [weak self] in self?.router?.presentNewSession(prompt: nil) }
     private var liveToken: AnyObject?
-    private let live = UILabel()
 
     var currentChatId: String? {
         get { list.currentChatId }
@@ -149,7 +156,7 @@ final class SidebarViewController: UIViewController, UISearchTextFieldDelegate {
     init(app: AppModel) {
         self.app = app
         self.list = SessionsViewController(app: app)
-        list.sidebarRows = true
+        self.nav = MainTabController.nav(list)
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -157,61 +164,47 @@ final class SidebarViewController: UIViewController, UISearchTextFieldDelegate {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = Palette.sidebar
-        navigationItem.largeTitleDisplayMode = .never
-        let wordmark = UILabel()
-        wordmark.text = "Zeron"
-        wordmark.font = Fonts.ui(.sansSemibold, 15)
-        wordmark.textColor = Palette.text
-        navigationItem.leftBarButtonItem = UIBarButtonItem(customView: wordmark)
-        navigationItem.leftItemsSupplementBackButton = true
-        navigationItem.rightBarButtonItems = [
-            UIBarButtonItem(image: UIImage(systemName: "square.and.pencil"), primaryAction: UIAction { [weak self] _ in
-                self?.router?.presentNewSession(prompt: nil)
-            }),
-            UIBarButtonItem(image: UIImage(systemName: "ellipsis"), menu: list.optionsMenu()),
-        ]
-        navigationItem.rightBarButtonItems?.first?.accessibilityIdentifier = "sidebar-new-session"
-        navigationItem.rightBarButtonItems?.first?.accessibilityLabel = "New session"
+        view.backgroundColor = Palette.background
+        addChild(nav)
+        nav.view.frame = view.bounds
+        nav.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        view.addSubview(nav.view)
+        nav.didMove(toParent: self)
 
-        search.placeholder = "Search"
-        search.font = Fonts.ui(.sansMedium, 14)
-        search.backgroundColor = Palette.controlFill
-        search.borderStyle = .none
-        search.layer.cornerRadius = 8
-        search.layer.cornerCurve = .continuous
-        search.clipsToBounds = true
-        search.returnKeyType = .search
-        search.delegate = self
-        search.accessibilityIdentifier = "sidebar-search"
-        search.addAction(UIAction { [weak self] _ in
-            self?.list.query = self?.search.text ?? ""
-        }, for: .editingChanged)
-
-        addChild(list)
-        list.view.backgroundColor = .clear
-        list.collectionView.backgroundColor = .clear
-
-        live.font = Fonts.ui(.sansMedium, 12)
-        live.textColor = Palette.secondary
-        live.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        footer.axis = .horizontal
-        footer.spacing = 4
-        footer.alignment = .center
-        footer.addArrangedSubview(iconButton("gearshape", label: "Settings", id: "sidebar-settings") { [weak self] in self?.router?.showSettings() })
-        footer.addArrangedSubview(iconButton("archivebox", label: "Archived", id: "sidebar-archived") { [weak self] in
-            guard let self else { return }
-            self.navigationController?.pushViewController(FolderViewController(app: self.app, folder: FolderRowVM(id: "archived", name: "Archived", count: 0, symbol: "archivebox")), animated: true)
+        _ = list.view
+        search.searchResultsUpdater = self
+        search.obscuresBackgroundDuringPresentation = false
+        search.hidesNavigationBarDuringPresentation = false
+        search.searchBar.placeholder = "Search"
+        search.searchBar.searchTextField.accessibilityIdentifier = "sidebar-search"
+        list.navigationItem.searchController = search
+        list.navigationItem.hidesSearchBarWhenScrolling = false
+        list.navigationItem.preferredSearchBarPlacement = .stacked
+        let settings = UIBarButtonItem(image: UIImage(named: "tab-settings"), primaryAction: UIAction { [weak self] _ in
+            self?.router?.showSettings()
         })
-        footer.addArrangedSubview(UIView())
-        footer.addArrangedSubview(live)
+        settings.accessibilityLabel = "Settings"
+        settings.accessibilityIdentifier = "sidebar-settings"
+        list.navigationItem.rightBarButtonItems = [list.navigationItem.rightBarButtonItem, settings].compactMap { $0 }
 
-        for v in [search, list.view!, footer] as [UIView] {
-            v.translatesAutoresizingMaskIntoConstraints = false
-            view.addSubview(v)
-        }
-        list.didMove(toParent: self)
-        // t3: 1px border between the sidebar and the main column.
+        capsule.contentView.addSubview(accessory)
+        accessory.translatesAutoresizingMaskIntoConstraints = false
+        capsule.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(capsule)
+        NSLayoutConstraint.activate([
+            accessory.topAnchor.constraint(equalTo: capsule.contentView.topAnchor),
+            accessory.bottomAnchor.constraint(equalTo: capsule.contentView.bottomAnchor),
+            accessory.leadingAnchor.constraint(equalTo: capsule.contentView.leadingAnchor),
+            accessory.trailingAnchor.constraint(equalTo: capsule.contentView.trailingAnchor),
+            capsule.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            capsule.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+            capsule.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -8),
+            capsule.heightAnchor.constraint(equalToConstant: 48),
+        ])
+        // The list scrolls up past the capsule.
+        nav.additionalSafeAreaInsets.bottom = 48 + 16
+
+        // A hairline between the sidebar and the main column.
         let edge = UIView()
         edge.backgroundColor = Palette.hairline
         edge.translatesAutoresizingMaskIntoConstraints = false
@@ -222,59 +215,21 @@ final class SidebarViewController: UIViewController, UISearchTextFieldDelegate {
             edge.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             edge.widthAnchor.constraint(equalToConstant: 1 / max(1, traitCollection.displayScale)),
         ])
-        let divider = UIView()
-        divider.backgroundColor = Palette.hairline
-        divider.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(divider)
-        NSLayoutConstraint.activate([
-            search.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 4),
-            search.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
-            search.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
-            search.heightAnchor.constraint(equalToConstant: 34),
-            list.view.topAnchor.constraint(equalTo: search.bottomAnchor, constant: 6),
-            list.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            list.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            list.view.bottomAnchor.constraint(equalTo: footer.topAnchor, constant: -4),
-            footer.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 10),
-            footer.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -14),
-            footer.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -6),
-            footer.heightAnchor.constraint(equalToConstant: 36),
-            divider.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            divider.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            divider.bottomAnchor.constraint(equalTo: footer.topAnchor, constant: -2),
-            divider.heightAnchor.constraint(equalToConstant: 1 / max(1, traitCollection.displayScale)),
-        ])
-        updateLive()
-        liveToken = app.observe { [weak self] in self?.updateLive() }
+
+        accessory.update(app.live)
+        liveToken = app.observe { [weak self] in
+            guard let self else { return }
+            self.accessory.update(self.app.live)
+        }
     }
 
-    private func updateLive() {
-        var parts: [String] = []
-        if app.live.working > 0 { parts.append("\(app.live.working) working") }
-        if app.live.awaiting > 0 { parts.append("\(app.live.awaiting) need\(app.live.awaiting == 1 ? "s" : "") you") }
-        live.text = parts.joined(separator: " · ")
-    }
-
-    private func iconButton(_ symbol: String, label: String, id: String, action: @escaping () -> Void) -> UIButton {
-        var c = UIButton.Configuration.plain()
-        c.image = UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: 15, weight: .regular))
-        c.baseForegroundColor = Palette.secondary
-        c.contentInsets = NSDirectionalEdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8)
-        let b = UIButton(configuration: c, primaryAction: UIAction { _ in action() })
-        b.accessibilityLabel = label
-        b.accessibilityIdentifier = id
-        b.widthAnchor.constraint(equalToConstant: 36).isActive = true
-        b.heightAnchor.constraint(equalToConstant: 36).isActive = true
-        return b
+    func updateSearchResults(for searchController: UISearchController) {
+        list.query = searchController.searchBar.text ?? ""
     }
 
     func focusSearch() {
-        search.becomeFirstResponder()
-    }
-
-    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
-        textField.resignFirstResponder()
-        return true
+        nav.popToRootViewController(animated: false)
+        search.searchBar.becomeFirstResponder()
     }
 }
 
