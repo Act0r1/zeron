@@ -85,6 +85,18 @@ final class SessionFlowTests: XCTestCase {
         app.buttons["Queue message"].tap()
         XCTAssertTrue(app.buttons["More queue actions"].waitForExistence(timeout: 5))
         snapshot(app, "queued")
+        // A second queued message, then the composer put away.
+        input.typeText("And link the docs, with a much longer follow-up line that has to wrap or fade somewhere.")
+        app.buttons["Queue message"].tap()
+        // Regression: a long queued message pushed its row's buttons off the card.
+        let second = app.buttons.matching(NSPredicate(format: "label == 'More queue actions'")).element(boundBy: 1)
+        XCTAssertTrue(second.waitForExistence(timeout: 5))
+        XCTAssertTrue(second.isHittable, "the long row's actions stay on the card")
+        XCTAssertLessThanOrEqual(second.frame.maxX, app.windows.firstMatch.frame.maxX)
+        snapshot(app, "queued-two")
+        app.scrollViews["transcript"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap()
+        sleep(1)
+        snapshot(app, "queued-resting")
     }
 
     func testJumpToLatestAfterScrollingUp() {

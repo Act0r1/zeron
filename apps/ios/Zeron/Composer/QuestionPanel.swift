@@ -270,6 +270,15 @@ final class QueuePanel: UIView {
             s.translatesAutoresizingMaskIntoConstraints = false
             v.addSubview(s)
         }
+        // A long message fades inside the row; it must never outweigh the
+        // row's width (it used to stretch the row past the card and push the
+        // send / more buttons off the edge).
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        label.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        for b in [send, more] {
+            b.setContentCompressionResistancePriority(.required, for: .horizontal)
+            b.setContentHuggingPriority(.required, for: .horizontal)
+        }
         NSLayoutConstraint.activate([
             icon.leadingAnchor.constraint(equalTo: v.leadingAnchor, constant: 14),
             icon.centerYAnchor.constraint(equalTo: v.centerYAnchor),
