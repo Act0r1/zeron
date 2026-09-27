@@ -91,7 +91,6 @@ final class MoreViewController: UIViewController, UICollectionViewDelegate {
         s.appendSections(["Account"])
         s.appendItems([
             Row(id: "account", title: app.accountName, subtitle: app.accountDetail, symbol: "person.crop.circle", accessory: .none),
-            Row(id: "org", title: "Switch Organization", symbol: "building.2"),
         ])
         s.appendSections(["Devices"])
         s.appendItems(app.hostOptions.map { Row(id: "device:\($0.id)", title: $0.name, subtitle: $0.online ? "Online" : "Offline", symbol: "desktopcomputer", accessory: .dot($0.online)) })
@@ -112,11 +111,6 @@ final class MoreViewController: UIViewController, UICollectionViewDelegate {
         s.appendItems(wall)
         s.appendSections(["Sessions"])
         s.appendItems([Row(id: "archived", title: "Archived Sessions", symbol: "archivebox")])
-        s.appendSections(["Diagnostics"])
-        s.appendItems([
-            Row(id: "lab", title: "Transcript Lab", subtitle: "Layout engine + painter over fixtures", symbol: "text.viewfinder"),
-            Row(id: "version", title: "Zeron core \(coreVersion())", subtitle: "Rust mobile core linked via UniFFI", symbol: "cpu", accessory: .none),
-        ])
         s.appendSections([" "])
         s.appendItems([Row(id: "signout", title: "Sign Out", symbol: "rectangle.portrait.and.arrow.right", accessory: .none, destructive: true)])
         dataSource.apply(s, animatingDifferences: false)
@@ -131,30 +125,8 @@ final class MoreViewController: UIViewController, UICollectionViewDelegate {
             UserDefaults.standard.set(style, forKey: "appearance")
             view.window?.overrideUserInterfaceStyle = UIUserInterfaceStyle(rawValue: style) ?? .unspecified
             reload()
-        case "org":
-            // The org picker lives in sign-in (multi-org accounts are asked).
-            let alert = UIAlertController(title: "Switch organization?", message: "You'll sign in again and pick an organization. Local drafts stay on this device.", preferredStyle: .actionSheet)
-            alert.addAction(UIAlertAction(title: "Sign In Again", style: .default) { [weak self] _ in self?.app.signOut() })
-            alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-            present(alert, animated: true)
-        case "wallpaper:choose":
-            WallpaperPicker.present(from: self)
-        case "wallpaper:effect":
-            let sheet = UIAlertController(title: "Wallpaper Effect", message: nil, preferredStyle: .actionSheet)
-            for e in WallpaperStore.allEffects {
-                let action = UIAlertAction(title: WallpaperStore.label(e), style: .default) { _ in WallpaperStore.effect = e }
-                action.setValue(e == WallpaperStore.effect, forKey: "checked")
-                sheet.addAction(action)
-            }
-            sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-            sheet.popoverPresentationController?.sourceView = collectionView.cellForItem(at: path)
-            present(sheet, animated: true)
-        case "wallpaper:remove":
-            WallpaperStore.remove()
         case "archived":
             navigationController?.pushViewController(FolderViewController(app: app, folder: FolderRowVM(id: "archived", name: "Archived", count: 0, symbol: "archivebox")), animated: true)
-        case "lab":
-            navigationController?.pushViewController(TranscriptLabViewController(), animated: true)
         case "signout":
             let alert = UIAlertController(title: "Sign out?", message: "Local drafts stay on this device.", preferredStyle: .actionSheet)
             alert.addAction(UIAlertAction(title: "Sign Out", style: .destructive) { [weak self] _ in self?.app.signOut() })

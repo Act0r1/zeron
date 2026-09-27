@@ -406,7 +406,11 @@ final class SessionFlowTests: XCTestCase {
         XCTAssertTrue(effect.waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Halftone'")).firstMatch.exists)
         snapshot(app, "wallpaper-settings")
-        app.staticTexts["Remove Wallpaper"].tap()
+        // Scroll the row clear of the bottom accessory / tab bar before tapping.
+        let remove = app.staticTexts["Remove Wallpaper"]
+        let limit = app.windows.firstMatch.frame.height * 0.7
+        for _ in 0..<4 where remove.frame.maxY > limit { app.swipeUp() }
+        remove.tap()
         XCTAssertTrue(app.staticTexts["Choose Wallpaper…"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["Effect"].exists)
     }
