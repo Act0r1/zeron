@@ -229,6 +229,7 @@ final class SessionViewController: UIViewController, UIGestureRecognizerDelegate
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
         if isMovingFromParent || navigationController == nil {
+            if tabBarController != nil { (splitViewController as? SplitRootController)?.sessionDidClose(chatId) }
             source.detach()
             engine.close()
             app.markSeen(chatId)
@@ -305,21 +306,33 @@ final class SessionViewController: UIViewController, UIGestureRecognizerDelegate
         Drafts.save(chatId, stashed ? stashedDraft : composer.text)
     }
 
+    /// An edit lease is being requested (taps on other rows wait).
+    private var editPending = false
+
     private func beginEdit(_ id: String) {
-        // One edit at a time: hand the previous row back first (the draft
-        // stash stays the user's).
+        guard !editPending else { return }
+        editPending = true
         let switching = editingQueueId != nil
-        editingQueueId = nil
+        if switching {
+            // Row A goes back and the user's own draft returns right away, so
+            // nothing of A's edit can be sent as a new message meanwhile.
+            editingQueueId = nil
+            restoreStash()
+            composer.placeholder = shown.placeholder
+            render(animated: true)
+        }
         Task { @MainActor in
+            defer { editPending = false }
             if switching { await source.finishEdit(text: nil) }
             guard let text = await source.beginEdit(id) else {
                 let alert = UIAlertController(title: "Can't edit right now", message: "Another device is editing this message, or it was just sent.", preferredStyle: .alert)
                 alert.addAction(UIAlertAction(title: "OK", style: .default))
-                // A switch from another edit failed: the draft comes back.
-                restoreStash()
-                composer.placeholder = shown.placeholder
-                render(animated: true)
                 present(alert, animated: true)
+                return
+            }
+            // Left the session while waiting: give the row straight back.
+            guard view.window != nil else {
+                await source.finishEdit(text: nil)
                 return
             }
             if !stashed {

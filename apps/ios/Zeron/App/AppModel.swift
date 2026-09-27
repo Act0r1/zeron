@@ -170,7 +170,16 @@ final class AppModel {
         await MainActor.run { onSignedIn?() }
     }
 
-    func signOut() { onSignOut?() }
+    /// The user signing out: this device forgets the account's local docs.
+    func signOut() {
+        forgetOnSignOut = true
+        onSignOut?()
+    }
+
+    /// Set only by a sign-out the user asked for. An expired session keeps its
+    /// store (the outbox may hold unsent messages); the `.owner` marker still
+    /// keeps a different account out of it.
+    private var forgetOnSignOut = false
 
     func signOutLocally() {
         client?.shutdown()
@@ -178,9 +187,9 @@ final class AppModel {
         Credentials.clearStored()
         AccountProfile.clear()
         clock?.invalidate()
-        // Nothing of this account survives: its local docs and every
-        // in-memory projection of them.
-        try? FileManager.default.removeItem(at: Self.coreDir)
+        if forgetOnSignOut { try? FileManager.default.removeItem(at: Self.coreDir) }
+        forgetOnSignOut = false
+        // Nothing of the account stays in memory.
         frontPage = FrontPage()
         archived = []
         rows = [:]
@@ -259,7 +268,7 @@ final class AppModel {
         case let .authRefreshed(tokens):
             Credentials.updateTokens(tokens)
         case .authExpired:
-            signOut()
+            onSignOut?()
         }
     }
 

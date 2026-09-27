@@ -186,6 +186,9 @@ pub(crate) struct SessionCore {
     state: Mutex<CoreState>,
     transcript_tx: watch::Sender<Arc<SessionSnapshot>>,
     composer: RwLock<Arc<ComposerState>>,
+    /// Serializes composer recomputes: each reads its inputs and publishes
+    /// under it, so an older read can't land after a newer one.
+    recompute_gate: Mutex<()>,
     view_attached: AtomicBool,
     /// Last open/attach/detach (warm-set eviction order).
     touched_ms: std::sync::atomic::AtomicI64,
@@ -240,6 +243,7 @@ impl SessionCore {
             }),
             transcript_tx,
             composer: RwLock::new(composer),
+            recompute_gate: Mutex::new(()),
             view_attached: AtomicBool::new(false),
             touched_ms: std::sync::atomic::AtomicI64::new(now_ms()),
         });
@@ -468,6 +472,7 @@ impl SessionCore {
 
     /// Rebuild the composer view (also after workspace/connectivity changes).
     pub(crate) fn recompute_composer(&self, client: &Arc<ClientInner>) {
+        let _gate = lock(&self.recompute_gate);
         let workspace = client.workspace.snapshot();
         let row = workspace.session(&self.chat_id).cloned();
         let snapshot = self.snapshot();

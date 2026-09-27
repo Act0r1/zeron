@@ -164,7 +164,13 @@ async fn check(response: reqwest::Response) -> Result<reqwest::Response> {
         return Ok(response);
     }
     let body = response.text().await.unwrap_or_default();
-    if status.is_client_error() {
+    // Timeouts and rate limits are transient, not a rejected credential
+    // (an Auth error signs the user out).
+    let transient = matches!(
+        status,
+        reqwest::StatusCode::REQUEST_TIMEOUT | reqwest::StatusCode::TOO_MANY_REQUESTS
+    );
+    if status.is_client_error() && !transient {
         Err(ClientError::Auth(format!("{status}: {body}")))
     } else {
         Err(ClientError::Network(format!("{status}: {body}")))

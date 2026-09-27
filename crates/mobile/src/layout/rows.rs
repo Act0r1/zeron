@@ -181,11 +181,13 @@ pub(crate) struct RowBuilder {
 }
 
 fn quick_hash(s: &str) -> u64 {
-    // Cheap change detector for part text: length + FNV of the tail window.
-    let tail = &s.as_bytes()[s.len().saturating_sub(64)..];
-    let mut h = row_key(std::str::from_utf8(tail).unwrap_or(""));
-    h ^= s.len() as u64;
-    h
+    // Change detector for a part's text: the whole text, so a same-length
+    // rewrite is caught too. Only parts of messages that changed get here,
+    // and re-parsing them is already linear in their length.
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    s.hash(&mut h);
+    h.finish()
 }
 
 impl RowBuilder {

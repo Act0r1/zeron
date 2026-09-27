@@ -131,6 +131,14 @@ final class SplitRootController: UISplitViewController, UISplitViewControllerDel
         sidebar.currentChatId = chatId
     }
 
+    /// A session was closed in the tab shell (compact): widening shouldn't
+    /// bring it back.
+    func sessionDidClose(_ chatId: String) {
+        guard isCollapsed, currentChatId == chatId else { return }
+        currentChatId = nil
+        sidebar.currentChatId = nil
+    }
+
     // MARK: Collapse / expand
 
     /// Narrowing to compact carries the open session into the tab shell; the
@@ -150,9 +158,10 @@ final class SplitRootController: UISplitViewController, UISplitViewControllerDel
     /// main column (or the new-session page when none was).
     func splitViewController(_ svc: UISplitViewController, displayModeForExpandingToProposedDisplayMode proposed: UISplitViewController.DisplayMode) -> UISplitViewController.DisplayMode {
         DispatchQueue.main.async {
+            let current = self.currentChatId
             self.tabs.popToFrontPage()
             let shown = (self.detail.viewControllers.first as? SessionViewController)?.chatId
-            if let chatId = self.currentChatId {
+            if let chatId = current {
                 if shown != chatId {
                     self.detail.setViewControllers([SessionViewController(app: self.app, chatId: chatId)], animated: false)
                 }

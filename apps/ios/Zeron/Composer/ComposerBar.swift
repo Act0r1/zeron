@@ -643,9 +643,10 @@ final class ComposerBar: UIView, UITextViewDelegate, UIGestureRecognizerDelegate
         let staged = images
         let result = onSend?(body, staged, mode) ?? .sent
         guard result != .kept else { return }
-        mentions.reset()
         setSuggestionsVisible(false)
+        // `.replaced` put a draft back: its @file mentions must still resolve.
         guard result == .sent else { return }
+        mentions.reset()
         textView.text = ""
         images = []
         textChanged()
