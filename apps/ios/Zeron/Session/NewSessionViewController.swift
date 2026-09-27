@@ -1,7 +1,7 @@
 import UIKit
 
 /// What a new session will be created with.
-struct NewSessionDraft: Equatable {
+struct NewSessionDraft: Equatable, Codable {
     var projectId: String?
     /// Projectless sessions run on an explicit host.
     var hostId: String?
@@ -53,6 +53,11 @@ final class NewSessionViewController: UIViewController, UIGestureRecognizerDeleg
 
     /// Embedded in the iPad split's main column (no sheet chrome).
     private let embedded: Bool
+    private var backgroundObserver: NSObjectProtocol?
+
+    deinit {
+        if let backgroundObserver { NotificationCenter.default.removeObserver(backgroundObserver) }
+    }
     /// Take the keyboard on appearing. The sheet always does; the iPad column
     /// only when opened on purpose (not the launch page).
     var focusOnAppear: Bool
@@ -64,13 +69,36 @@ final class NewSessionViewController: UIViewController, UIGestureRecognizerDeleg
         self.onCreated = onCreated
         self.draft = app.lastDraft
         super.init(nibName: nil, bundle: nil)
-        composer.text = prompt ?? ""
+        // Pick up where the page was left (closed without sending).
+        composer.text = prompt ?? app.newSessionText
+        composer.images = app.newSessionImages
+    }
+
+    /// A session was created from this page: nothing to keep.
+    private var created = false
+
+    /// Closed (swipe down, ✕, or replaced in the iPad column) without
+    /// sending: keep what was typed and picked for next time.
+    private func rememberDraft() {
+        guard !created else { return }
+        app.lastDraft = draft
+        app.newSessionText = composer.text
+        app.newSessionImages = composer.images
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        rememberDraft()
     }
 
     required init?(coder: NSCoder) { fatalError() }
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        // The app can be killed in the background: keep the draft first.
+        backgroundObserver = NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.rememberDraft()
+        }
         // Tapping the canvas puts the keyboard away (the card stays open here).
         let dismissTap = UITapGestureRecognizer(target: self, action: #selector(dismissKeyboard))
         dismissTap.cancelsTouchesInView = false
@@ -333,6 +361,9 @@ final class NewSessionViewController: UIViewController, UIGestureRecognizerDeleg
             present(alert, animated: true)
             return false
         }
+        created = true
+        app.newSessionText = ""
+        app.newSessionImages = []
         // Lift the draft out (page + composer + typed text) so the chat can
         // take over in one motion.
         onCreated(chatId, DraftHandoff.capture(from: self, composer: composer, text: text))

@@ -237,6 +237,42 @@ final class SessionFlowTests: XCTestCase {
         XCTAssertFalse(chip.label.contains("Claude Code"), "chip shows a model, got \(chip.label)")
     }
 
+    /// Closing the new-session page keeps what was typed and the options
+    /// picked; sending clears the text for next time.
+    func testNewSessionRemembersDraftWhenClosed() {
+        let app = launch()
+        let accessory = app.buttons["new-session"]
+        XCTAssertTrue(accessory.waitForExistence(timeout: 10))
+        accessory.tap()
+        let input = app.textViews["composer-input"]
+        XCTAssertTrue(input.waitForExistence(timeout: 5))
+        input.typeText("Half-written idea")
+        let effort = app.buttons["composer-chip-effort"]
+        XCTAssertTrue(effort.waitForExistence(timeout: 5))
+        effort.tap()
+        app.buttons["Low"].firstMatch.tap()
+        XCTAssertTrue(effort.label.contains("Low"))
+        // Drag the sheet away by its top edge.
+        let bar = app.navigationBars["New Session"]
+        let top = bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2))
+        top.press(forDuration: 0.05, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98)))
+        XCTAssertTrue(input.waitForNonExistence(timeout: 5), "sheet dismissed")
+
+        accessory.tap()
+        XCTAssertTrue(input.waitForExistence(timeout: 5))
+        XCTAssertEqual(input.value as? String, "Half-written idea", "typed text comes back")
+        XCTAssertTrue(app.buttons["composer-chip-effort"].label.contains("Low"), "picked effort comes back")
+
+        // Sending uses it up: the next page starts empty.
+        app.buttons["composer-send"].tap()
+        XCTAssertTrue(app.scrollViews["transcript"].waitForExistence(timeout: 10))
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(accessory.waitForExistence(timeout: 5))
+        accessory.tap()
+        XCTAssertTrue(input.waitForExistence(timeout: 5))
+        XCTAssertNotEqual(input.value as? String, "Half-written idea")
+    }
+
     func testEffortPickerInNewSession() {
         let app = launch(["-route", "new"])
         let chip = app.buttons["composer-chip-effort"]
