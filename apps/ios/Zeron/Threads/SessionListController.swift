@@ -206,21 +206,8 @@ class SessionListController: UIViewController, UICollectionViewDelegate {
             split.openSession(id)
             return
         }
-        guard let nav = navigationController, opening == nil else { return }
-        // Pushed once its transcript is laid out (the bar's edge effect then
-        // fades in with the slide); the tapped row's highlight covers the wait.
-        let vc = SessionViewController(app: app, chatId: id)
-        opening = id
-        vc.prepareForPush(size: nav.view.bounds.size) { [weak self, weak nav] in
-            self?.opening = nil
-            // Moved on meanwhile (another tab): don't push from off screen.
-            guard let self, let nav, self.viewIfLoaded?.window != nil else { return vc.discardUnshown() }
-            nav.pushViewController(vc, animated: true)
-        }
+        navigationController?.pushViewController(SessionViewController(app: app, chatId: id), animated: true)
     }
-
-    /// A session being prepared for its push (repeat taps wait for it).
-    private var opening: String?
 
     func openFolder(_ id: String) {
         guard let f = folders[id] ?? app.frontPage.folders.first(where: { $0.id == id }) else { return }

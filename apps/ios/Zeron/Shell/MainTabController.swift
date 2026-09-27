@@ -182,10 +182,7 @@ final class MainTabController: UITabBarController, UITabBarControllerDelegate, A
         selectedTab = tab
         guard let nav = tab.viewController as? UINavigationController else { return }
         nav.popToRootViewController(animated: false)
-        let session = SessionViewController(app: app, chatId: chatId)
-        session.prepareForPush(size: nav.view.bounds.size) { [weak nav] in
-            nav?.pushViewController(session, animated: true)
-        }
+        nav.pushViewController(SessionViewController(app: app, chatId: chatId), animated: true)
     }
 }
 
