@@ -155,6 +155,30 @@ final class AppModel {
         refreshWorkspace()
     }
 
+    /// Pull to refresh: redial the registry and rooms and re-probe health (the
+    /// same resync as returning to the foreground), then report back once the
+    /// workspace has updated — at least `minimum` so the spinner doesn't
+    /// flicker, at most `maximum` if nothing changes.
+    func refresh(minimum: TimeInterval = 0.6, maximum: TimeInterval = 3, completion: @escaping () -> Void) {
+        let started = Date()
+        var finished = false
+        var token: AnyObject?
+        let finish = {
+            guard !finished else { return }
+            finished = true
+            token = nil
+            let wait = max(0, minimum - Date().timeIntervalSince(started))
+            DispatchQueue.main.asyncAfter(deadline: .now() + wait, execute: completion)
+        }
+        token = observe { finish() }
+        client?.onForeground()
+        refreshWorkspace()
+        DispatchQueue.main.asyncAfter(deadline: .now() + maximum) {
+            finish()
+            _ = token
+        }
+    }
+
     // MARK: Observation
 
     @discardableResult

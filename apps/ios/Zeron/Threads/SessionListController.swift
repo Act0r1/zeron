@@ -102,12 +102,15 @@ class SessionListController: UIViewController, UICollectionViewDelegate {
             self.collectionView.collectionViewLayout.invalidateLayout()
         }
         // Pull to re-probe sync (health + room redial) when a network looks stale.
-        collectionView.refreshControl = UIRefreshControl(frame: .zero, primaryAction: UIAction { [weak self] action in
-            self?.app.willEnterForeground()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-                (action.sender as? UIRefreshControl)?.endRefreshing()
-            }
-        })
+        // (The control is captured directly: a primary action's `sender` is
+        // nil, so ending via `action.sender` left the spinner running forever.)
+        let refresh = UIRefreshControl()
+        refresh.addAction(UIAction { [weak self, weak refresh] _ in
+            guard let self else { return refresh?.endRefreshing() ?? () }
+            self.app.refresh { refresh?.endRefreshing() }
+        }, for: .valueChanged)
+        refresh.accessibilityIdentifier = "pull-to-refresh"
+        collectionView.refreshControl = refresh
     }
 
     /// Subclasses build their sections from the app model.

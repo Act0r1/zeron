@@ -477,4 +477,19 @@ final class SessionFlowTests: XCTestCase {
         snapshot(app, "runway")
         XCTAssertFalse(app.buttons["jump-to-latest"].isHittable, "held runway is 'the bottom'")
     }
+
+    /// Regression: pull to refresh on the front page spun forever (the list
+    /// stayed pushed down by the spinner).
+    func testPullToRefreshEnds() {
+        let app = launch()
+        let list = app.collectionViews.firstMatch
+        let first = app.cells["section-pinned"]
+        XCTAssertTrue(first.waitForExistence(timeout: 10))
+        sleep(1)
+        let restingY = first.frame.minY
+        let start = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25))
+        start.press(forDuration: 0.05, thenDragTo: list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.85)))
+        sleep(4)
+        XCTAssertEqual(first.frame.minY, restingY, accuracy: 4, "refresh ended and the list settled back")
+    }
 }
