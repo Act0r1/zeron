@@ -108,13 +108,9 @@ jobs:
       - name: Xcode version
         run: xcodebuild -version
 
-      - name: Compile iOS app and tests
-        working-directory: apps/ios
-        run: |
-          xcodebuild -project Zeron.xcodeproj -scheme Zeron \
-            -destination 'generic/platform=iOS Simulator' \
-            CODE_SIGNING_ALLOWED=NO build-for-testing
-
+      # No separate simulator build: a generic simulator destination also
+      # builds x86_64, which the Rust core doesn't ship, and PR CI already
+      # builds and tests the app. The archive is the release build.
       - name: Archive build
         working-directory: apps/ios
         run: |
