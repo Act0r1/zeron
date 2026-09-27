@@ -16,7 +16,9 @@ final class MainTabController: UITabBarController, UITabBarControllerDelegate, A
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = Palette.background
-        tabBar.tintColor = Palette.accent
+        // The selected tab reads through the glass pill + label weight; the
+        // violet accent made it shout.
+        tabBar.tintColor = Palette.text
         tabBarMinimizeBehavior = .onScrollDown
 
         let sessions = UITab(title: "Sessions", image: UIImage(systemName: "bubble.left.and.text.bubble.right"), identifier: "sessions") { [app] _ in
@@ -69,6 +71,13 @@ final class MainTabController: UITabBarController, UITabBarControllerDelegate, A
             view.layoutIfNeeded()
             accessoryContent.alpha = 0
         }
+    }
+
+    /// The accessory's frame when it's on screen (toast placement).
+    func accessoryFrame(in window: UIWindow) -> CGRect? {
+        guard bottomAccessory != nil, accessoryContent.window != nil, !accessoryContent.isHidden else { return nil }
+        // The content view sits inside the glass capsule; its bounds are the capsule's.
+        return accessoryContent.convert(accessoryContent.bounds, to: window)
     }
 
     func setAccessoryContentAlpha(_ alpha: CGFloat) {
@@ -178,7 +187,8 @@ final class AskAnythingAccessory: UIControl {
         mark.contentMode = .center
         let plate = UIView()
         plate.backgroundColor = Palette.accentSoft
-        plate.layer.cornerRadius = 11
+        // A circle, concentric with the accessory capsule (7pt inset).
+        plate.layer.cornerRadius = 17
         plate.layer.cornerCurve = .continuous
         plate.isUserInteractionEnabled = false
         plate.addSubview(mark)

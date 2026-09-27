@@ -566,24 +566,19 @@ final class ComposerBar: UIView, UITextViewDelegate, UIGestureRecognizerDelegate
             config.baseForegroundColor = enabled ? .white : Palette.tertiary
             config.contentInsets = .zero
         case .queue:
-            symbol = steering ? "arrow.turn.down.right" : "text.line.last.and.arrowtriangle.forward"
+            // Same look as Send (the long-press menu still offers steer /
+            // stop-and-send); only the accessibility label says "Queue".
+            symbol = "arrow.up"
             config.baseBackgroundColor = Palette.accent
             config.baseForegroundColor = .white
-            config.title = steering ? "Steer" : "Queue"
-            config.imagePadding = 5
-            config.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 12, bottom: 0, trailing: 13)
-            config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { a in
-                var a = a
-                a.font = Fonts.ui(.sansSemibold, 14)
-                return a
-            }
+            config.contentInsets = .zero
         case .stop:
             symbol = "stop.fill"
             config.baseBackgroundColor = Palette.text
             config.baseForegroundColor = Palette.background
             config.contentInsets = .zero
         }
-        config.image = UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: action == .stop ? 11 : action == .queue ? 12 : 15, weight: .bold))
+        config.image = UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: action == .stop ? 11 : 15, weight: .bold))
         let changed = currentAction != action
         currentAction = action
         let apply = {
