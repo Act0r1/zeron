@@ -73,7 +73,9 @@ final class SessionViewController: UIViewController, UIGestureRecognizerDelegate
             // live turn's runway and just follows.
             let queued = self.shown.running && mode == .queue
             self.source.send(text: text, images: images, mode: mode)
-            if queued { self.list.scrollToBottom(animated: true) } else { self.list.beginOwnTurn() }
+            // Sending puts the keyboard away (the composer rests as the capsule).
+            DispatchQueue.main.async { self.composer.resignFirstResponder() }
+            if queued { self.list.expectQueuedTurn() } else { self.list.beginOwnTurn() }
         }
         composer.onStop = { [weak self] in self?.source.stop() }
         composer.text = Drafts.load(chatId)
@@ -218,13 +220,13 @@ final class SessionViewController: UIViewController, UIGestureRecognizerDelegate
 
     // MARK: Arrival from the new-session draft (DraftHandoffAnimator)
 
-    /// Content hidden, composer focused so the keyboard never drops.
+    /// Content hidden until the handoff reveals it; the keyboard goes away
+    /// with the draft (sending dismisses it).
     func prepareArrival() {
         loadViewIfNeeded()
         list.beginOwnTurn()
         list.alpha = 0
         bottom.alpha = 0
-        composer.becomeFirstResponder()
         view.layoutIfNeeded()
     }
 

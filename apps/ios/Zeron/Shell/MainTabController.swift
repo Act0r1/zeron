@@ -129,9 +129,9 @@ final class MainTabController: UITabBarController, UITabBarControllerDelegate, A
             nav.pushViewController(session, animated: false)
             setAccessoryVisible(false, animated: false)
             view.layoutIfNeeded()
-            // Focus moves to the chat's composer *before* the sheet goes, so the
-            // keyboard is handed over instead of dropping and popping back.
             session.prepareArrival()
+            // Sending puts the keyboard away; it slides down with the handoff.
+            presentedViewController?.view.endEditing(true)
             // Hide the sheet now; tear it down only once the motion is done.
             // Dismissal (plus the keyboard re-hosting with it) is a heavy
             // compositor frame — mid-animation it swallowed the motion.

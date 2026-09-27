@@ -47,6 +47,7 @@ final class SessionFlowTests: XCTestCase {
         input.tap()
         input.typeText("Summarize the launch post in three bullets.")
         app.buttons["composer-send"].tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 3), "keyboard dismissed on send")
         // Optimistic echo appears immediately, then the host streams a reply.
         let echo = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'You: Summarize the launch post'")).firstMatch
         XCTAssertTrue(echo.waitForExistence(timeout: 3))
@@ -80,12 +81,14 @@ final class SessionFlowTests: XCTestCase {
         input.typeText("Write a long reply please.")
         app.buttons["composer-send"].tap()
         XCTAssertTrue(app.buttons["Stop response"].waitForExistence(timeout: 5))
+        input.tap()
         input.typeText("Then add a TL;DR.")
         XCTAssertTrue(app.buttons["Queue message"].waitForExistence(timeout: 2))
         app.buttons["Queue message"].tap()
         XCTAssertTrue(app.buttons["More queue actions"].waitForExistence(timeout: 5))
         snapshot(app, "queued")
         // A second queued message, then the composer put away.
+        input.tap()
         input.typeText("And link the docs, with a much longer follow-up line that has to wrap or fade somewhere.")
         app.buttons["Queue message"].tap()
         // Regression: a long queued message pushed its row's buttons off the card.
@@ -132,9 +135,9 @@ final class SessionFlowTests: XCTestCase {
         input.typeText("Add a dark mode toggle to settings")
         app.buttons["composer-send"].tap()
         XCTAssertTrue(app.scrollViews["transcript"].waitForExistence(timeout: 10), "hands off into the new session")
-        // The handoff keeps the keyboard up (focus moves to the chat's composer)
-        // and ends with the sheet gone and the message in the transcript.
-        XCTAssertTrue(app.keyboards.firstMatch.exists, "keyboard handed over, not dropped")
+        // Sending puts the keyboard away; the handoff ends with the sheet gone
+        // and the message in the transcript.
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 3), "keyboard dismissed on send")
         XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'You: Add a dark mode toggle'")).firstMatch.waitForExistence(timeout: 5))
         sleep(1)
         XCTAssertFalse(app.buttons["Close"].exists, "sheet dismissed after the motion")
@@ -335,7 +338,6 @@ final class SessionFlowTests: XCTestCase {
         input.tap()
         input.typeText("Summarize the launch post in three bullets.")
         app.buttons["composer-send"].tap()
-        app.keyboards.firstMatch.swipeDown()
         sleep(1)
         // Drag from the left edge a third of the way and let go: the pop cancels.
         let window = app.windows.firstMatch
@@ -378,6 +380,7 @@ final class SessionFlowTests: XCTestCase {
         input.typeText("Write a long reply please.")
         app.buttons["composer-send"].tap()
         XCTAssertTrue(app.buttons["Stop response"].waitForExistence(timeout: 5))
+        input.tap()
         input.typeText("Then add a TL;DR.")
         app.buttons["Queue message"].tap()
         XCTAssertTrue(app.buttons["More queue actions"].waitForExistence(timeout: 5))

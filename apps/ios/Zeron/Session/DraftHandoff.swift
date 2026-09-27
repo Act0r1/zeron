@@ -84,8 +84,13 @@ enum DraftHandoffAnimator {
             h.scene.alpha = 0
             if !reduce { h.scene.transform = CGAffineTransform(scaleX: 0.985, y: 0.985) }
         }
-        UIView.animate(withDuration: reduce ? 0.2 : 0.55, delay: 0, usingSpringWithDamping: 0.9, initialSpringVelocity: 0, options: [.beginFromCurrentState]) {
-            if let target = composerTarget { h.composer.frame = target }
+        // The chat's composer slides down with the keyboard while this runs,
+        // so the glide tracks its live frame rather than a snapshot of it.
+        // The draft card keeps its size (no image squash) and settles onto the
+        // chat's resting capsule, bottom edges aligned, while they crossfade.
+        ComposerGlide.run(view: h.composer, from: h.composerFrame, duration: reduce ? 0.2 : 0.55) {
+            let live = session.arrivalComposerFrame(in: window) ?? composerTarget ?? h.composerFrame
+            return CGRect(x: live.minX, y: live.maxY - h.composerFrame.height, width: h.composerFrame.width, height: h.composerFrame.height)
         }
         UIView.animate(withDuration: 0.18, delay: reduce ? 0 : 0.36, options: [.curveEaseInOut]) {
             session.revealArrivalComposer()
@@ -122,6 +127,49 @@ enum DraftHandoffAnimator {
         guard tries < 20 else { return go(nil) }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.016) {
             waitForBubble(session, window: window, tries: tries + 1, go)
+        }
+    }
+}
+
+/// Tweens a view from a start frame toward a target that may move while it
+/// runs (read every frame), with an ease-out close to the spring it replaces.
+@MainActor
+private final class ComposerGlide: NSObject {
+    private var link: CADisplayLink?
+    private let view: UIView
+    private let from: CGRect
+    private let duration: CFTimeInterval
+    private let target: () -> CGRect
+    private let start = CACurrentMediaTime()
+    private var retain: ComposerGlide?
+
+    static func run(view: UIView, from: CGRect, duration: CFTimeInterval, target: @escaping () -> CGRect) {
+        let glide = ComposerGlide(view: view, from: from, duration: duration, target: target)
+        glide.retain = glide
+        let link = CADisplayLink(target: glide, selector: #selector(tick))
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 120, preferred: 120)
+        link.add(to: .main, forMode: .common)
+        glide.link = link
+    }
+
+    private init(view: UIView, from: CGRect, duration: CFTimeInterval, target: @escaping () -> CGRect) {
+        self.view = view
+        self.from = from
+        self.duration = duration
+        self.target = target
+    }
+
+    @objc private func tick() {
+        let t = min(1, (CACurrentMediaTime() - start) / duration)
+        // easeOutQuart
+        let e = 1 - pow(1 - t, 4)
+        let to = target()
+        func lerp(_ a: CGFloat, _ b: CGFloat) -> CGFloat { a + (b - a) * CGFloat(e) }
+        view.frame = CGRect(x: lerp(from.minX, to.minX), y: lerp(from.minY, to.minY), width: lerp(from.width, to.width), height: lerp(from.height, to.height))
+        if t >= 1 || view.superview == nil {
+            link?.invalidate()
+            link = nil
+            retain = nil
         }
     }
 }

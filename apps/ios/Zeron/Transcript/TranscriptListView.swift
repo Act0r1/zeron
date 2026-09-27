@@ -56,23 +56,50 @@ final class TranscriptListView: UIScrollView, RowViewDelegate, UIScrollViewDeleg
     /// frame (~90% in ~230 ms), ease-out.
     private static let glideRetain: Double = 0.85
 
-    /// Reserve the reply's space below the prompt about to be sent (every
-    /// immediate send; queued sends keep the live turn's runway).
-    func beginOwnTurn() {
-        var before = Set<UInt64>()
+    /// User rows near the tail right now (a new one after this is ours).
+    private func recentUserKeys() -> Set<UInt64> {
+        var keys = Set<UInt64>()
         if let frame = current {
             let n = frame.rowCount()
             for i in stride(from: Int(n) - 1, through: max(0, Int(n) - 24), by: -1) {
-                if let p = frame.placement(index: UInt32(i)), p.kind == .user { before.insert(p.key) }
+                if let p = frame.placement(index: UInt32(i)), p.kind == .user { keys.insert(p.key) }
             }
         }
-        ownTurn = OwnTurn(key: nil, before: before)
+        return keys
+    }
+
+    /// Reserve the reply's space below the prompt about to be sent (every
+    /// immediate send; queued sends keep the live turn's runway).
+    func beginOwnTurn() {
+        queuedTurn = nil
+        ownTurn = OwnTurn(key: nil, before: recentUserKeys())
         setFollowing(true)
     }
+
+    /// A message queued behind the live turn: it gets the runway once its
+    /// bubble materializes in the transcript (desktop
+    /// `promote_materialized_queued_turn`), not before — the live turn keeps
+    /// its own until then.
+    func expectQueuedTurn() {
+        if queuedTurn == nil { queuedTurn = recentUserKeys() }
+    }
+    private var queuedTurn: Set<UInt64>?
 
     /// Resolve the prompt row and the height the runway holds for `frame`.
     private func contentHeight(for frame: LayoutFrame) -> CGFloat {
         let natural = CGFloat(frame.totalHeight())
+        if let before = queuedTurn {
+            let n = Int(frame.rowCount())
+            for i in stride(from: n - 1, through: max(0, n - 12), by: -1) {
+                if let p = frame.placement(index: UInt32(i)), p.kind == .user, !before.contains(p.key) {
+                    // The queued prompt landed: promote it to own the runway.
+                    queuedTurn = nil
+                    ownTurn = OwnTurn(key: p.key, before: before)
+                    setFollowing(true)
+                    break
+                }
+            }
+        }
         guard var turn = ownTurn else {
             runwayHeight = nil
             return natural
