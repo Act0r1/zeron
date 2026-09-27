@@ -50,6 +50,13 @@ final class MainTabController: UITabBarController, UITabBarControllerDelegate {
     private lazy var accessory = UITabAccessory(contentView: accessoryContent)
     private var liveToken: AnyObject?
 
+    /// Accessory state from what's on screen: hidden over a session (it has
+    /// its own composer) and on the search tab.
+    func syncAccessory() {
+        let top = (selectedTab?.viewController as? UINavigationController)?.topViewController
+        setAccessoryVisible(!(top is SessionViewController), animated: false)
+    }
+
     /// Pushed sessions carry their own composer; the accessory steps aside.
     func setAccessoryVisible(_ visible: Bool, animated: Bool) {
         let target = visible && !(selectedTab is UISearchTab) ? accessory : nil

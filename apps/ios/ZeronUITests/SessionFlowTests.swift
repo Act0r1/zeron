@@ -306,4 +306,28 @@ final class SessionFlowTests: XCTestCase {
             snapshot(live, "live-tools-\(k)")
         }
     }
+
+    /// Regression: a half swipe-back (cancelled) detached the session, so the
+    /// streaming reply froze until you left and came back; the cancelled pop
+    /// could also leave "New session" showing over the session.
+    func testCancelledSwipeBackKeepsStreaming() {
+        let app = launch(["-route", "chat:chat-deploy"], fast: false)
+        let input = app.textViews["composer-input"]
+        XCTAssertTrue(input.waitForExistence(timeout: 10))
+        input.tap()
+        input.typeText("Summarize the launch post in three bullets.")
+        app.buttons["composer-send"].tap()
+        app.keyboards.firstMatch.swipeDown()
+        sleep(1)
+        // Drag from the left edge a third of the way and let go: the pop cancels.
+        let window = app.windows.firstMatch
+        let start = window.coordinate(withNormalizedOffset: CGVector(dx: 0.01, dy: 0.5))
+        start.press(forDuration: 0.05, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5)), withVelocity: .slow, thenHoldForDuration: 0.3)
+        sleep(1)
+        XCTAssertTrue(input.exists, "still on the session")
+        XCTAssertFalse(app.buttons["new-session"].isHittable, "no New session accessory over the session")
+        // The reply keeps streaming to completion.
+        XCTAssertTrue(app.staticTexts.matching(identifier: "row-markdown").element(boundBy: 0).waitForExistence(timeout: 20))
+        XCTAssertTrue(app.buttons["Send message"].waitForExistence(timeout: 40), "turn settles (updates still arriving)")
+    }
 }

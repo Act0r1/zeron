@@ -158,23 +158,33 @@ final class SessionViewController: UIViewController {
             if visible { jumpButton.alpha = 0 }
         }, completion: { context in
             // An interactive pop that's cancelled keeps the session on screen.
-            if context.isCancelled {
-                tabs.setAccessoryVisible(!visible, animated: false)
-                bottomStack.alpha = 1
-            }
+            // Re-derive the accessory from what's actually on top rather than
+            // flipping: a cancelled pop also re-runs viewWillAppear, and two
+            // flips left "New session" showing over the session.
+            if context.isCancelled { bottomStack.alpha = 1 }
+            tabs.syncAccessory()
         })
     }
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         list.settleEdgeEffect()
+        (tabBarController as? MainTabController)?.syncAccessory()
     }
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         Drafts.save(chatId, composer.text)
-        if isMovingFromParent {
-            setAccessory(visible: true)
+        if isMovingFromParent { setAccessory(visible: true) }
+    }
+
+    /// Tear down only once the pop has really happened: an interactive
+    /// swipe-back reports `isMovingFromParent` in viewWillDisappear too, and
+    /// if it's cancelled the session stays on screen — detaching there left it
+    /// frozen (no new updates) until you left and came back.
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        if isMovingFromParent || navigationController == nil {
             source.detach()
             engine.close()
             app.markSeen(chatId)
