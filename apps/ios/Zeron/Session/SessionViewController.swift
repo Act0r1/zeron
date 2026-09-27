@@ -2,7 +2,7 @@ import UIKit
 
 /// One session: virtualized transcript under a glass bottom stack (status
 /// pill, queue, composer or question panel) that rides the keyboard.
-final class SessionViewController: UIViewController {
+final class SessionViewController: UIViewController, UIGestureRecognizerDelegate {
     private let app: AppModel
     let chatId: String
     private let source: SessionSource
@@ -43,6 +43,11 @@ final class SessionViewController: UIViewController {
         list.imageLoader = { [weak self] ref, iv in self?.source.loadImage(ref, into: iv) }
         list.onDistanceFromBottom = { [weak self] d in self?.setJumpVisible(d > 140) }
         view.addSubview(list)
+        // Tapping the transcript puts the composer (and keyboard) away.
+        let dismissTap = UITapGestureRecognizer(target: self, action: #selector(dismissComposer))
+        dismissTap.cancelsTouchesInView = false
+        dismissTap.delegate = self
+        list.addGestureRecognizer(dismissTap)
         setContentScrollView(list, for: .top)
         list.topEdgeEffect.style = .soft
         list.bottomEdgeEffect.isHidden = true
@@ -189,6 +194,20 @@ final class SessionViewController: UIViewController {
             engine.close()
             app.markSeen(chatId)
         }
+    }
+
+    @objc private func dismissComposer() {
+        if composer.textView.isFirstResponder { composer.resignFirstResponder() }
+    }
+
+    /// Controls in the transcript (tool rows, copy, disclosure) keep their taps.
+    func gestureRecognizer(_ g: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        var v = touch.view
+        while let view = v, view !== list {
+            if view is UIControl { return false }
+            v = view.superview
+        }
+        return true
     }
 
     private let bottomFade = EdgeFadeOverlay()

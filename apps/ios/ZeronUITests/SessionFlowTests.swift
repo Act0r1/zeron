@@ -330,4 +330,23 @@ final class SessionFlowTests: XCTestCase {
         XCTAssertTrue(app.staticTexts.matching(identifier: "row-markdown").element(boundBy: 0).waitForExistence(timeout: 20))
         XCTAssertTrue(app.buttons["Send message"].waitForExistence(timeout: 40), "turn settles (updates still arriving)")
     }
+
+    /// Tapping the transcript dismisses the keyboard and the composer rests
+    /// as the capsule again (a draft stays in it).
+    func testTapOutsideMinimizesComposer() {
+        let app = launch(["-route", "chat:chat-deploy"])
+        let input = app.textViews["composer-input"]
+        XCTAssertTrue(input.waitForExistence(timeout: 10))
+        input.tap()
+        input.typeText("Half-written thought")
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["composer-chip-model"].isHittable, "card toolbar while composing")
+        app.scrollViews["transcript"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35)).tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 3), "keyboard dismissed")
+        sleep(1)
+        XCTAssertFalse(app.buttons["composer-chip-model"].isHittable, "composer rests as the capsule")
+        // (The sim keyboard's autocorrect may append to the typed text.)
+        XCTAssertTrue((input.value as? String ?? "").hasPrefix("Half-written"), "draft kept")
+        snapshot(app, "composer-minimized")
+    }
 }

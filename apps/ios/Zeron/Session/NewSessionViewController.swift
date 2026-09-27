@@ -41,7 +41,7 @@ struct ModelChoice: Equatable {
 /// "Ask anything" → a composer-first canvas. Context is set with native menus
 /// (project, branch/worktree, model, effort) that load lazily; the composer is
 /// focused immediately so the common case is: tap, type, send.
-final class NewSessionViewController: UIViewController {
+final class NewSessionViewController: UIViewController, UIGestureRecognizerDelegate {
     private let app: AppModel
     private let onCreated: (String) -> Void
     private let composer = ComposerBar()
@@ -62,6 +62,11 @@ final class NewSessionViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        // Tapping the canvas puts the keyboard away (the card stays open here).
+        let dismissTap = UITapGestureRecognizer(target: self, action: #selector(dismissKeyboard))
+        dismissTap.cancelsTouchesInView = false
+        dismissTap.delegate = self
+        view.addGestureRecognizer(dismissTap)
         view.backgroundColor = Palette.background
         title = "New Session"
         navigationItem.leftBarButtonItem = UIBarButtonItem(systemItem: .close, primaryAction: UIAction { [weak self] _ in
@@ -119,6 +124,14 @@ final class NewSessionViewController: UIViewController {
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         composer.becomeFirstResponder()
+    }
+
+    @objc private func dismissKeyboard() {
+        view.endEditing(true)
+    }
+
+    func gestureRecognizer(_ g: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        touch.view.map { !$0.isDescendant(of: composer) } ?? true
     }
 
     private var project: ProjectOption? { app.projectOptions.first { $0.id == draft.projectId } }

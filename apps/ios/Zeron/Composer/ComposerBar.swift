@@ -99,7 +99,11 @@ final class ComposerBar: UIView, UITextViewDelegate, UIGestureRecognizerDelegate
     private var mentionTask: Task<Void, Never>?
 
     private let font = Fonts.ui(.sans, UIFontMetrics(forTextStyle: .body).scaledValue(for: 16.5))
-    private var maxLines: Int { traitCollection.verticalSizeClass == .compact ? 3 : 8 }
+    private var maxLines: Int {
+        // Resting capsule previews at most two lines of a draft.
+        if !isCard { return 2 }
+        return traitCollection.verticalSizeClass == .compact ? 3 : 8
+    }
     private static let control: CGFloat = 34
     private static let compactHeight: CGFloat = 50
 
@@ -288,8 +292,10 @@ final class ComposerBar: UIView, UITextViewDelegate, UIGestureRecognizerDelegate
 
     // MARK: Resting ↔ card
 
+    /// The card is for composing: focused, holding photos, or pinned open
+    /// (new-session canvas). An unfocused draft rests as the capsule.
     private var wantsCard: Bool {
-        chipsAlwaysVisible || textView.isFirstResponder || hasContent || !images.isEmpty
+        chipsAlwaysVisible || textView.isFirstResponder || !images.isEmpty
     }
 
     private func updateMode(animated: Bool) {
@@ -396,7 +402,9 @@ final class ComposerBar: UIView, UITextViewDelegate, UIGestureRecognizerDelegate
     }
 
     func textViewDidEndEditing(_ textView: UITextView) {
+        setSuggestionsVisible(false)
         updateMode(animated: true)
+        textView.setContentOffset(.zero, animated: false)
         onFocusChange?(false)
     }
 
