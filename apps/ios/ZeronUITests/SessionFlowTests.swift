@@ -385,4 +385,20 @@ final class SessionFlowTests: XCTestCase {
         XCTAssertTrue(more.isHittable, "queue shows again after coming back")
         snapshot(app, "queue-after-return")
     }
+
+    /// Wallpaper controls in Settings: effect + remove appear once one is set.
+    func testWallpaperSettings() throws {
+        let path = "/tmp/wall-tahoe.png"
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: path), "needs a host image at \(path)")
+        let app = launch(["-wallpaper", path, "-wallpaper-effect", "halftone", "-route", "more"])
+        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 10))
+        let effect = app.staticTexts["Effect"]
+        for _ in 0..<4 where !effect.isHittable { app.swipeUp() }
+        XCTAssertTrue(effect.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Halftone'")).firstMatch.exists)
+        snapshot(app, "wallpaper-settings")
+        app.staticTexts["Remove Wallpaper"].tap()
+        XCTAssertTrue(app.staticTexts["Choose Wallpaper…"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Effect"].exists)
+    }
 }

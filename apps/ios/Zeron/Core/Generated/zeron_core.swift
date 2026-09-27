@@ -10853,6 +10853,96 @@ public func FfiConverterTypeTranscriptScale_lower(_ value: TranscriptScale) -> R
 
 
 /**
+ * Artwork treatment (desktop `NewThreadBackgroundEffect`).
+ */
+
+public enum WallpaperEffect: Equatable, Hashable {
+    
+    case none
+    case dither
+    case ascii
+    case halftone
+    case scanlines
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension WallpaperEffect: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeWallpaperEffect: FfiConverterRustBuffer {
+    typealias SwiftType = WallpaperEffect
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> WallpaperEffect {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .none
+        
+        case 2: return .dither
+        
+        case 3: return .ascii
+        
+        case 4: return .halftone
+        
+        case 5: return .scanlines
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: WallpaperEffect, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .none:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .dither:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .ascii:
+            writeInt(&buf, Int32(3))
+        
+        
+        case .halftone:
+            writeInt(&buf, Int32(4))
+        
+        
+        case .scanlines:
+            writeInt(&buf, Int32(5))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeWallpaperEffect_lift(_ buf: RustBuffer) throws -> WallpaperEffect {
+    return try FfiConverterTypeWallpaperEffect.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeWallpaperEffect_lower(_ value: WallpaperEffect) -> RustBuffer {
+    return FfiConverterTypeWallpaperEffect.lower(value)
+}
+
+
+
+/**
  * Native affordances the painter renders itself (icons, images, spinners).
  */
 
@@ -12747,6 +12837,44 @@ public func layoutFixtureMarkdown() -> String  {
     )
 })
 }
+/**
+ * Apply `effect` to an RGBA image; `light` is the appearance it's drawn in
+ * (effects print on white paper in light mode, black in dark).
+ */
+public func wallpaperRender(rgba: Data, width: UInt32, height: UInt32, effect: WallpaperEffect, light: Bool) -> Data  {
+    return try!  FfiConverterData.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_zeron_mobile_fn_func_wallpaper_render(
+        FfiConverterData.lower(rgba),
+        FfiConverterUInt32.lower(width),
+        FfiConverterUInt32.lower(height),
+        FfiConverterTypeWallpaperEffect_lower(effect),
+        FfiConverterBool.lower(light),uniffiCallStatus
+    )
+})
+}
+/**
+ * The highest opacity the artwork may be drawn at over `background_rgb` so
+ * `text_rgb` keeps `min_contrast` (WCAG) against the *worst* part of the top
+ * `region` (0–1, fraction of the image height where text sits): the bright
+ * tail when text is light, the dark tail when text is dark. Clamped to
+ * [0, `max_opacity`].
+ */
+public func wallpaperSafeOpacity(rgba: Data, width: UInt32, height: UInt32, textRgb: UInt32, backgroundRgb: UInt32, region: Float, minContrast: Float, maxOpacity: Float) -> Float  {
+    return try!  FfiConverterFloat.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_zeron_mobile_fn_func_wallpaper_safe_opacity(
+        FfiConverterData.lower(rgba),
+        FfiConverterUInt32.lower(width),
+        FfiConverterUInt32.lower(height),
+        FfiConverterUInt32.lower(textRgb),
+        FfiConverterUInt32.lower(backgroundRgb),
+        FfiConverterFloat.lower(region),
+        FfiConverterFloat.lower(minContrast),
+        FfiConverterFloat.lower(maxOpacity),uniffiCallStatus
+    )
+})
+}
 
 private enum InitializationResult {
     case ok
@@ -12827,6 +12955,12 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_zeron_mobile_checksum_func_layout_fixture_markdown() != 37734) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_zeron_mobile_checksum_func_wallpaper_render() != 28318) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_zeron_mobile_checksum_func_wallpaper_safe_opacity() != 57056) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_zeron_mobile_checksum_method_clientlistener_on_event() != 55106) {

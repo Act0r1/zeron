@@ -160,6 +160,13 @@ class SessionListController: UIViewController, UICollectionViewDelegate {
         dataSource.apply(snapshot, animatingDifferences: animated && view.window != nil)
     }
 
+    /// Subclasses follow the scroll (the front page fades its wallpaper).
+    func listDidScroll(_ scrollView: UIScrollView) {}
+
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        listDidScroll(scrollView)
+    }
+
     // MARK: Navigation
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
@@ -308,9 +315,19 @@ class SessionsViewController: SessionListController {
     /// Sidebar search (iPad): non-empty shows matches instead of sections.
     var query = "" { didSet { if query != oldValue { reload(animated: true) } } }
 
+    /// The chat wallpaper behind the top of the front page (phone shell; the
+    /// iPad sidebar reuses this list without it). Fixed behind the list,
+    /// fading out as the list scrolls up over it.
+    private let wallpaper = WallpaperView()
+
     override func viewDidLoad() {
         collapsible = true
         super.viewDidLoad()
+        if !sidebarRows {
+            let backdrop = UIView()
+            backdrop.addSubview(wallpaper)
+            collectionView.backgroundView = backdrop
+        }
         title = "Sessions"
         navigationItem.largeTitleDisplayMode = .always
         navigationItem.rightBarButtonItem = UIBarButtonItem(image: UIImage(systemName: "ellipsis"), menu: optionsMenu())
@@ -326,6 +343,19 @@ class SessionsViewController: SessionListController {
         }
         out.append(("recent", out.isEmpty ? nil : "Recent", [], app.frontPage.sessions))
         return out
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        guard !sidebarRows else { return }
+        // Desktop hero: 72% of the viewport, at most 760pt.
+        wallpaper.frame = CGRect(x: 0, y: 0, width: view.bounds.width, height: min(view.bounds.height * 0.72, 760))
+    }
+
+    override func listDidScroll(_ scrollView: UIScrollView) {
+        guard !sidebarRows else { return }
+        let travel = scrollView.contentOffset.y + scrollView.adjustedContentInset.top
+        wallpaper.scrollFade = 1 - max(0, travel) / max(1, wallpaper.bounds.height * 0.6)
     }
 
     override func headerMenu(_ id: String) -> UIMenu? {

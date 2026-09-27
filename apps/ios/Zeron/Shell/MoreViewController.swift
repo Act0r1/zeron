@@ -81,7 +81,10 @@ final class MoreViewController: UIViewController, UICollectionViewDelegate {
             cv.dequeueConfiguredReusableSupplementary(using: header, for: path)
         }
         reload()
+        wallpaperObserver = NotificationCenter.default.addObserver(forName: WallpaperStore.didChange, object: nil, queue: .main) { [weak self] _ in self?.reload() }
     }
+
+    private var wallpaperObserver: NSObjectProtocol?
 
     private func reload() {
         var s = NSDiffableDataSourceSnapshot<String, Row>()
@@ -99,6 +102,14 @@ final class MoreViewController: UIViewController, UICollectionViewDelegate {
             Row(id: "appearance:1", title: "Light", symbol: "sun.max", accessory: .check(style == 1)),
             Row(id: "appearance:2", title: "Dark", symbol: "moon", accessory: .check(style == 2)),
         ])
+        s.appendSections(["Wallpaper"])
+        var wall = [Row(id: "wallpaper:choose", title: WallpaperStore.isSet ? "Change Wallpaper…" : "Choose Wallpaper…", subtitle: WallpaperStore.isSet ? WallpaperStore.name : "Shown behind new chats and the sessions list", symbol: "photo")]
+        if WallpaperStore.isSet {
+            let effect = WallpaperStore.effect
+            wall.append(Row(id: "wallpaper:effect", title: "Effect", subtitle: "\(WallpaperStore.label(effect)) — \(WallpaperStore.detail(effect))", symbol: "wand.and.stars"))
+            wall.append(Row(id: "wallpaper:remove", title: "Remove Wallpaper", symbol: "trash", accessory: .none, destructive: true))
+        }
+        s.appendItems(wall)
         s.appendSections(["Sessions"])
         s.appendItems([Row(id: "archived", title: "Archived Sessions", symbol: "archivebox")])
         s.appendSections(["Diagnostics"])
@@ -126,6 +137,20 @@ final class MoreViewController: UIViewController, UICollectionViewDelegate {
             alert.addAction(UIAlertAction(title: "Sign In Again", style: .default) { [weak self] _ in self?.app.signOut() })
             alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
             present(alert, animated: true)
+        case "wallpaper:choose":
+            WallpaperPicker.present(from: self)
+        case "wallpaper:effect":
+            let sheet = UIAlertController(title: "Wallpaper Effect", message: nil, preferredStyle: .actionSheet)
+            for e in WallpaperStore.allEffects {
+                let action = UIAlertAction(title: WallpaperStore.label(e), style: .default) { _ in WallpaperStore.effect = e }
+                action.setValue(e == WallpaperStore.effect, forKey: "checked")
+                sheet.addAction(action)
+            }
+            sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+            sheet.popoverPresentationController?.sourceView = collectionView.cellForItem(at: path)
+            present(sheet, animated: true)
+        case "wallpaper:remove":
+            WallpaperStore.remove()
         case "archived":
             navigationController?.pushViewController(FolderViewController(app: app, folder: FolderRowVM(id: "archived", name: "Archived", count: 0, symbol: "archivebox")), animated: true)
         case "lab":

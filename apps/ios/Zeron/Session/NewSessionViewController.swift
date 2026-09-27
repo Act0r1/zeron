@@ -46,6 +46,7 @@ final class NewSessionViewController: UIViewController, UIGestureRecognizerDeleg
     private let onCreated: (String) -> Void
     private let composer = ComposerBar()
     private let hero = UILabel()
+    private let wallpaper = WallpaperView()
     private let mark = UIImageView()
     private var draft: NewSessionDraft
     private var models: [ModelChoice] = []
@@ -92,6 +93,7 @@ final class NewSessionViewController: UIViewController, UIGestureRecognizerDeleg
         heroStack.spacing = 14
         heroStack.alignment = .center
         heroStack.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(wallpaper)
         view.addSubview(heroStack)
 
         composer.translatesAutoresizingMaskIntoConstraints = false
@@ -128,9 +130,15 @@ final class NewSessionViewController: UIViewController, UIGestureRecognizerDeleg
                 heroStack.bottomAnchor.constraint(equalTo: composer.topAnchor, constant: -32),
             ])
         } else {
+            // Centered in the free space, but never under the composer when the
+            // keyboard lifts it.
+            let centered = heroStack.centerYAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerYAnchor, constant: -60)
+            centered.priority = .defaultHigh
             NSLayoutConstraint.activate([
                 heroStack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-                heroStack.centerYAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerYAnchor, constant: -60),
+                centered,
+                heroStack.bottomAnchor.constraint(lessThanOrEqualTo: composer.topAnchor, constant: -28),
+                heroStack.topAnchor.constraint(greaterThanOrEqualTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
                 composer.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 12),
                 composer.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -12),
                 composer.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor, constant: -8),
@@ -154,6 +162,14 @@ final class NewSessionViewController: UIViewController, UIGestureRecognizerDeleg
         // The sheet focuses at once; the iPad draft waits for a tap (its
         // on-screen keyboard would cover half the column).
         if !embedded { composer.becomeFirstResponder() }
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        // Desktop hero: from the top, 72% of the viewport (≤ 760pt), the
+        // artwork softened behind the composer.
+        wallpaper.frame = CGRect(x: 0, y: 0, width: view.bounds.width, height: min(view.bounds.height * 0.72, 760))
+        wallpaper.cutout = composer.convert(composer.bounds, to: wallpaper)
     }
 
     @objc private func dismissKeyboard() {

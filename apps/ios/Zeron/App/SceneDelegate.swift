@@ -20,6 +20,19 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             self?.showRoot(animated: true)
         }
         let args = ProcessInfo.processInfo.arguments
+        // `-wallpaper <path> [-wallpaper-effect ascii]`: set the wallpaper at
+        // launch (screenshots, tests); `-wallpaper none` clears it.
+        if let i = args.firstIndex(of: "-wallpaper"), i + 1 < args.count {
+            if args[i + 1] == "none" {
+                WallpaperStore.remove()
+            } else if let image = UIImage(contentsOfFile: args[i + 1]) {
+                WallpaperStore.set(image, name: (args[i + 1] as NSString).lastPathComponent)
+            }
+        }
+        if let i = args.firstIndex(of: "-wallpaper-effect"), i + 1 < args.count,
+           let effect = WallpaperStore.allEffects.first(where: { WallpaperStore.key($0) == args[i + 1] }) {
+            WallpaperStore.effect = effect
+        }
         if args.contains("-lab") {
             window.rootViewController = MainTabController.nav(TranscriptLabViewController())
         } else {
