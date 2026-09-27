@@ -184,7 +184,7 @@ final class SessionCell: UICollectionViewListCell {
         }
         title.frame = CGRect(x: textX, y: titleY, width: max(0, trailing - textX), height: titleH)
         let tile = (14 * k).rounded()
-        projectTile.frame = CGRect(x: textX, y: metaY + (metaH - tile) / 2, width: tile, height: tile)
+        projectTile.frame = CGRect(x: textX, y: Self.xHeightCenter(Fonts.ui(.sans, TypeScale.size(13.5)), top: metaY, height: metaH) - tile / 2, width: tile, height: tile)
         let x = textX + tile + 7
         var metaRight = b.width - right
         if !prBadge.isHidden {
@@ -195,6 +195,14 @@ final class SessionCell: UICollectionViewListCell {
         meta.frame = CGRect(x: x, y: metaY, width: max(0, metaRight - x), height: metaH)
     }
 
+    /// Where lowercase text next to a glyph visually centers: the middle of
+    /// the x-height above the baseline a single-line label draws at. (Line-box
+    /// centering left the project tile riding high beside "zgui".)
+    static func xHeightCenter(_ font: UIFont, top: CGFloat, height: CGFloat) -> CGFloat {
+        let baseline = top + (height - font.lineHeight) / 2 + font.ascender
+        return (baseline - font.xHeight / 2).rounded()
+    }
+
     private func layoutSidebar() {
         let b = contentView.bounds
         let k = TypeScale.factor
@@ -202,7 +210,7 @@ final class SessionCell: UICollectionViewListCell {
         // Line 1: project tile + name, status/time at the right.
         let l1 = (9 * k).rounded(), l1h = (18 * k).rounded()
         let tile = (14 * k).rounded()
-        projectTile.frame = CGRect(x: left, y: l1 + (l1h - tile) / 2, width: tile, height: tile)
+        projectTile.frame = CGRect(x: left, y: Self.xHeightCenter(Fonts.ui(.sansMedium, TypeScale.size(12.5)), top: l1, height: l1h) - tile / 2, width: tile, height: tile)
         let tw = ceil(time.sizeThatFits(CGSize(width: 140, height: 40)).width)
         time.frame = CGRect(x: b.width - right - tw, y: l1, width: tw, height: l1h)
         var trailing = time.frame.minX - 8

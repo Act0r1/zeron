@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use zeron_doc::parts::MessagePart;
+use zeron_doc::parts::{MessagePart, SubagentStatus};
 use zeron_proto::ToolCall;
 use zeron_text::WhiteSpace;
 
@@ -351,8 +351,20 @@ impl RowBuilder {
             for (i, part) in parts.iter().enumerate() {
                 let dkey = row_key(&format!("{id}/{}", part.id()));
                 match part {
-                    MessagePart::Tool { call, is_error, resolved, .. } => {
+                    MessagePart::Tool { call, is_error, resolved, subagent_ref, subagent_status, .. } => {
                         let (label, detail) = zeron_proto::view::tool_chip_content(call);
+                        // Subagent lifecycle is distinct from `resolved`: under
+                        // eager-done the spawn call resolves while the subagent
+                        // still runs (desktop transcript.rs `running`/`failed`).
+                        let (running, is_error) = if agents {
+                            let spawned = subagent_ref.is_some();
+                            (
+                                spawned && matches!(subagent_status, Some(SubagentStatus::Running)) || !spawned && !*resolved,
+                                &(*is_error || spawned && matches!(subagent_status, Some(SubagentStatus::Failed))),
+                            )
+                        } else {
+                            (!*resolved, is_error)
+                        };
                         let color = if *is_error { ColorRole::Danger } else { ColorRole::TextSecondary };
                         let badge = if agents {
                             None
@@ -373,7 +385,7 @@ impl RowBuilder {
                             detail,
                             badge,
                             failed: *is_error,
-                            running: !*resolved,
+                            running,
                             key: dkey,
                             open,
                             body,

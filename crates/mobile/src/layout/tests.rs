@@ -243,3 +243,47 @@ fn folded_user_message_fades_its_last_line() {
     assert!(!in_band.is_empty(), "fade covers the last shown line");
     assert!(in_band.iter().all(|b| (b - in_band[0]).abs() < 0.5));
 }
+
+#[test]
+fn running_subagent_shows_a_spinner_after_its_spawn_resolves() {
+    use zeron_doc::parts::{MessagePart, MessageStatus, SubagentStatus};
+    use zeron_doc::schema::{MessageRole, SessionMessageEntry};
+    let spawn = |status: SubagentStatus| MessagePart::Tool {
+        id: "k1".into(),
+        call: zeron_proto::ToolCall::Unknown { name: "Agent: scan the repo".into(), input: None },
+        is_error: false,
+        // Eager-done: the spawn call resolved while the subagent still runs.
+        resolved: true,
+        output: None,
+        diff: None,
+        output_ref: None,
+        output_bytes: None,
+        diff_ref: None,
+        diff_stats: None,
+        subagent_ref: Some("sub-1".into()),
+        subagent_status: Some(status),
+        subagent_tail: None,
+    };
+    let frame_for = |status: SubagentStatus| {
+        let mut w = worker(390.0);
+        w.input = TranscriptInput {
+            entries: vec![Arc::new(SessionMessageEntry {
+                id: "a".into(),
+                role: MessageRole::Assistant,
+                parts: vec![spawn(status)],
+                created_at: 0,
+                device_id: String::new(),
+                status: Some(MessageStatus::Complete),
+                continuation_of: None,
+                duration_ms: None,
+            })],
+            ..Default::default()
+        };
+        w.pass()
+    };
+    let spinners = |f: &LayoutFrame| f.display(0).unwrap().widgets.iter().filter(|w| matches!(w.kind, display::WidgetKind::Spinner)).count();
+    assert_eq!(spinners(&frame_for(SubagentStatus::Running)), 1, "running subagent spins");
+    assert_eq!(spinners(&frame_for(SubagentStatus::Done)), 0, "finished subagent is quiet");
+    let failed = frame_for(SubagentStatus::Failed);
+    assert!(failed.display(0).unwrap().runs.iter().any(|r| r.color == display::ColorRole::Danger), "failed subagent is tinted danger");
+}

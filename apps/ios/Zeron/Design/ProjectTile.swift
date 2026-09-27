@@ -32,8 +32,10 @@ final class ProjectTileView: UIView {
         // 13pt desktop tile → radius 3, letter 9pt; scale with the tile.
         let k = bounds.width / 13
         layer.cornerRadius = 3 * k
-        letter.font = Fonts.ui(.monoMedium, 9 * k)
-        letter.frame = bounds
+        let font = Fonts.ui(.monoMedium, 9 * k)
+        letter.font = font
+        // Center the capital, not the line box (which rides the letter high).
+        letter.frame = CGRect(x: 0, y: bounds.midY - (font.ascender - font.capHeight / 2), width: bounds.width, height: font.lineHeight)
     }
 }
 
@@ -56,9 +58,10 @@ enum ProjectTile {
                 let k = side / 13
                 t.withAlphaComponent(0.08).setFill()
                 UIBezierPath(roundedRect: CGRect(x: 0, y: 0, width: side, height: side), cornerRadius: 3 * k).fill()
-                let s = NSAttributedString(string: letter(name), attributes: [.font: Fonts.ui(.monoMedium, 9 * k), .foregroundColor: t.withAlphaComponent(0.85)])
+                let font = Fonts.ui(.monoMedium, 9 * k)
+                let s = NSAttributedString(string: letter(name), attributes: [.font: font, .foregroundColor: t.withAlphaComponent(0.85)])
                 let size = s.size()
-                s.draw(at: CGPoint(x: (side - size.width) / 2, y: (side - size.height) / 2))
+                s.draw(at: CGPoint(x: (side - size.width) / 2, y: side / 2 - (font.ascender - font.capHeight / 2)))
             }.withRenderingMode(.alwaysOriginal)
             asset.register(img, with: traits)
         }
