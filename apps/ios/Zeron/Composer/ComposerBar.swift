@@ -471,7 +471,7 @@ final class ComposerBar: UIView, UITextViewDelegate, UIGestureRecognizerDelegate
             iv.layer.cornerRadius = 14
             iv.layer.cornerCurve = .continuous
             iv.layer.borderWidth = 1 / max(1, traitCollection.displayScale)
-            iv.layer.borderColor = Palette.hairline.resolvedColor(with: traitCollection).cgColor
+            iv.layer.borderColor = Palette.hairline.resolvedColor(with: window?.traitCollection ?? traitCollection).cgColor
             iv.isUserInteractionEnabled = true
             iv.translatesAutoresizingMaskIntoConstraints = false
             iv.widthAnchor.constraint(equalToConstant: 56).isActive = true

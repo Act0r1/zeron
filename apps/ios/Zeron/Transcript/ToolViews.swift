@@ -118,8 +118,36 @@ final class ToolRailView: UIView {
         return (incoming, branch, continuation)
     }
 
+    private var strokes: [CAShapeLayer] = []
+    private var covers: [CALayer] = []
+
+    /// Colors resolve against the traits this view actually lives in: at init
+    /// it isn't in the window yet, and its traits are the *system's* — with the
+    /// app set to Light on a Dark device that painted a white rail (invisible
+    /// on light) and a black cover the rows seemed to fade in from.
+    private func restyle() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        let stroke = color.resolvedColor(with: traitCollection).cgColor
+        let bg = Palette.background.resolvedColor(with: traitCollection).cgColor
+        for l in strokes { l.strokeColor = stroke }
+        for c in covers { c.backgroundColor = bg }
+        CATransaction.commit()
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window != nil { restyle() }
+    }
+
+    override func traitCollectionDidChange(_ previous: UITraitCollection?) {
+        super.traitCollectionDidChange(previous)
+        restyle()
+    }
+
     private func shape(_ path: UIBezierPath) -> CAShapeLayer {
         let l = CAShapeLayer()
+        strokes.append(l)
         l.path = path.cgPath
         l.strokeColor = color.resolvedColor(with: traitCollection).cgColor
         l.fillColor = nil
@@ -158,6 +186,7 @@ final class ToolRailView: UIView {
             // Content (icon + text) fades in with the branch: a background
             // cover over the row's content fades out.
             let cover = CALayer()
+            covers.append(cover)
             cover.backgroundColor = Palette.background.resolvedColor(with: traitCollection).cgColor
             cover.frame = CGRect(x: branchEnd + 2, y: tops[i], width: max(0, rowWidth - branchEnd - 2), height: rowMid * 2)
             layer.addSublayer(cover)

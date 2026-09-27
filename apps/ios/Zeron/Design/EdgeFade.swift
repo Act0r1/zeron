@@ -104,6 +104,11 @@ final class EdgeFadeOverlay: UIView {
 
     required init?(coder: NSCoder) { fatalError() }
 
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window != nil { restyle() }
+    }
+
     private func restyle() {
         let bg = Palette.background.resolvedColor(with: traitCollection)
         // Smoothstep-ish ramp over the first ~45%, then solid.
