@@ -58,6 +58,23 @@ final class MainTabController: UITabBarController, UITabBarControllerDelegate, A
     }
 
     /// Pushed sessions carry their own composer; the accessory steps aside.
+    /// Swipe-back / pop: put the accessory in place *before* the transition
+    /// animation (inside it, its first layout animates from a zero frame — it
+    /// flew in from the top of the screen), content transparent so it can
+    /// fade in with the gesture.
+    func prepareAccessoryForReveal() {
+        guard bottomAccessory == nil, !(selectedTab is UISearchTab) else { return }
+        UIView.performWithoutAnimation {
+            setBottomAccessory(accessory, animated: false)
+            view.layoutIfNeeded()
+            accessoryContent.alpha = 0
+        }
+    }
+
+    func setAccessoryContentAlpha(_ alpha: CGFloat) {
+        accessoryContent.alpha = alpha
+    }
+
     func setAccessoryVisible(_ visible: Bool, animated: Bool) {
         let target = visible && !(selectedTab is UISearchTab) ? accessory : nil
         guard bottomAccessory !== target else { return }

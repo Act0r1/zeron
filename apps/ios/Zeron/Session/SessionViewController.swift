@@ -158,11 +158,20 @@ final class SessionViewController: UIViewController, UIGestureRecognizerDelegate
         // interactive swipe-back too.
         let bottomStack = bottom
         let jumpButton = jump
-        if visible { bottomStack.alpha = 1 } else { bottomStack.alpha = 0 }
+        if visible {
+            bottomStack.alpha = 1
+            tabs.prepareAccessoryForReveal()
+        } else {
+            bottomStack.alpha = 0
+        }
         coordinator.animate(alongsideTransition: { _ in
-            tabs.setAccessoryVisible(visible, animated: false)
+            if visible {
+                tabs.setAccessoryContentAlpha(1)
+                jumpButton.alpha = 0
+            } else {
+                tabs.setAccessoryVisible(false, animated: false)
+            }
             bottomStack.alpha = visible ? 0 : 1
-            if visible { jumpButton.alpha = 0 }
         }, completion: { context in
             // An interactive pop that's cancelled keeps the session on screen.
             // Re-derive the accessory from what's actually on top rather than
@@ -170,6 +179,7 @@ final class SessionViewController: UIViewController, UIGestureRecognizerDelegate
             // flips left "New session" showing over the session.
             if context.isCancelled { bottomStack.alpha = 1 }
             tabs.syncAccessory()
+            tabs.setAccessoryContentAlpha(1)
         })
     }
 
@@ -315,11 +325,15 @@ final class SessionViewController: UIViewController, UIGestureRecognizerDelegate
             self.view.layoutIfNeeded()
         }
         let structural = (old.questions == nil) != (c.questions == nil) || old.queue.count != c.queue.count || (old.banner == .none) != (c.banner == .none)
-        if animated, (old.questions == nil) != (c.questions == nil) {
-            questions.setGlassVisible(c.questions != nil, animated: true)
+        // Panels materialize when their content appears; a first render (the
+        // session reopened with a queue or an open question) shows them at
+        // once — they used to stay dematerialized, so the queue "vanished"
+        // after navigating away and back.
+        if (old.questions == nil) != (c.questions == nil) || !animated {
+            questions.setGlassVisible(c.questions != nil, animated: animated)
         }
-        if animated, old.queue.isEmpty != c.queue.isEmpty {
-            queue.setGlassVisible(!c.queue.isEmpty, animated: true)
+        if old.queue.isEmpty != c.queue.isEmpty || !animated {
+            queue.setGlassVisible(!c.queue.isEmpty, animated: animated)
         }
         if animated, structural {
             UIView.animate(withDuration: 0.38, delay: 0, usingSpringWithDamping: 0.86, initialSpringVelocity: 0, options: [.allowUserInteraction, .beginFromCurrentState], animations: changes)

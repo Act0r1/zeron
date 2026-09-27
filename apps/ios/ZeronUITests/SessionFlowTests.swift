@@ -361,4 +361,28 @@ final class SessionFlowTests: XCTestCase {
         XCTAssertTrue((input.value as? String ?? "").hasPrefix("Half-written"), "draft kept")
         snapshot(app, "composer-minimized")
     }
+
+    /// Regression: leaving a session with a queue and coming back showed no
+    /// queue (the panel's glass never re-materialized on first render).
+    func testQueueSurvivesNavigatingAway() {
+        let app = launch(["-route", "chat:chat-home", "-longreply"], fast: false)
+        let input = app.textViews["composer-input"]
+        XCTAssertTrue(input.waitForExistence(timeout: 10))
+        input.tap()
+        input.typeText("Write a long reply please.")
+        app.buttons["composer-send"].tap()
+        XCTAssertTrue(app.buttons["Stop response"].waitForExistence(timeout: 5))
+        input.typeText("Then add a TL;DR.")
+        app.buttons["Queue message"].tap()
+        XCTAssertTrue(app.buttons["More queue actions"].waitForExistence(timeout: 5))
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        let accessory = app.buttons["new-session"]
+        XCTAssertTrue(accessory.waitForExistence(timeout: 5))
+        XCTAssertGreaterThan(accessory.frame.minY, app.windows.firstMatch.frame.height * 0.6, "accessory sits above the tab bar")
+        app.cells["session-chat-home"].firstMatch.tap()
+        let more = app.buttons["More queue actions"]
+        XCTAssertTrue(more.waitForExistence(timeout: 5))
+        XCTAssertTrue(more.isHittable, "queue shows again after coming back")
+        snapshot(app, "queue-after-return")
+    }
 }
