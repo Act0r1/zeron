@@ -19,6 +19,18 @@ class SessionListController: UIViewController, UICollectionViewDelegate {
     private var token: AnyObject?
     /// Show drag handles in edit mode (Pinned).
     var reorderable = false
+    /// t3-style three-line card rows (iPad sidebar).
+    var sidebarRows = false
+    /// The session open beside this list (iPad sidebar): drawn as current.
+    var currentChatId: String? {
+        didSet {
+            guard oldValue != currentChatId, dataSource != nil else { return }
+            var s = dataSource.snapshot()
+            let ids = Set([oldValue, currentChatId].compactMap { $0 })
+            s.reconfigureItems(s.itemIdentifiers.filter { if case let .session(id) = $0 { return ids.contains(id) } else { return false } })
+            dataSource.apply(s, animatingDifferences: false)
+        }
+    }
     /// Headers are disclosure rows that fold their section (front page).
     var collapsible = false
     private(set) var collapsed = Set(UserDefaults.standard.stringArray(forKey: "collapsedSections") ?? [])
@@ -48,7 +60,9 @@ class SessionListController: UIViewController, UICollectionViewDelegate {
 
         let sessionReg = UICollectionView.CellRegistration<SessionCell, String> { [weak self] cell, path, id in
             guard let self, let vm = self.sessions[id] else { return }
+            cell.sidebarStyle = self.sidebarRows
             cell.configure(vm)
+            cell.isCurrent = id == self.currentChatId
             cell.accessories = self.reorderable ? [.reorder(displayed: .whenEditing)] : []
         }
         let folderReg = UICollectionView.CellRegistration<FolderCell, String> { [weak self] cell, _, id in
@@ -178,6 +192,11 @@ class SessionListController: UIViewController, UICollectionViewDelegate {
     func headerMenu(_ id: String) -> UIMenu? { nil }
 
     func openSession(_ id: String) {
+        // iPad: sessions open beside the sidebar.
+        if let split = splitViewController as? SplitRootController, !split.isCollapsed {
+            split.openSession(id)
+            return
+        }
         navigationController?.pushViewController(SessionViewController(app: app, chatId: id), animated: true)
     }
 
@@ -285,7 +304,10 @@ class SessionListController: UIViewController, UICollectionViewDelegate {
 /// Front page, laid out like the desktop sidebar: Pinned and the user's
 /// sections inline as foldable groups, then everything else under Recent.
 /// Fold state persists; long-press a header for its actions.
-final class SessionsViewController: SessionListController {
+class SessionsViewController: SessionListController {
+    /// Sidebar search (iPad): non-empty shows matches instead of sections.
+    var query = "" { didSet { if query != oldValue { reload(animated: true) } } }
+
     override func viewDidLoad() {
         collapsible = true
         super.viewDidLoad()
@@ -295,6 +317,9 @@ final class SessionsViewController: SessionListController {
     }
 
     override func buildSections() -> [(id: String, header: String?, folders: [FolderRowVM], sessions: [SessionRowVM])] {
+        if !query.trimmingCharacters(in: .whitespaces).isEmpty {
+            return [("results", nil, [], app.search(query))]
+        }
         var out: [(id: String, header: String?, folders: [FolderRowVM], sessions: [SessionRowVM])] = []
         for f in app.frontPage.folders {
             out.append((f.id, f.name, [], app.sessions(inFolder: f.id)))
@@ -331,7 +356,7 @@ final class SessionsViewController: SessionListController {
         present(alert, animated: true)
     }
 
-    private func optionsMenu() -> UIMenu {
+    func optionsMenu() -> UIMenu {
         UIMenu(children: [
             UIAction(title: "New Section…", image: UIImage(systemName: "folder.badge.plus")) { [weak self] _ in
                 self?.promptForSection { name in self?.app.createSection(name) }

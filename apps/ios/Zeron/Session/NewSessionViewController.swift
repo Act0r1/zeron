@@ -50,8 +50,12 @@ final class NewSessionViewController: UIViewController, UIGestureRecognizerDeleg
     private var draft: NewSessionDraft
     private var models: [ModelChoice] = []
 
-    init(app: AppModel, prompt: String?, onCreated: @escaping (String) -> Void) {
+    /// Embedded in the iPad split's main column (no sheet chrome).
+    private let embedded: Bool
+
+    init(app: AppModel, prompt: String?, embedded: Bool = false, onCreated: @escaping (String) -> Void) {
         self.app = app
+        self.embedded = embedded
         self.onCreated = onCreated
         self.draft = app.lastDraft
         super.init(nibName: nil, bundle: nil)
@@ -68,15 +72,18 @@ final class NewSessionViewController: UIViewController, UIGestureRecognizerDeleg
         dismissTap.delegate = self
         view.addGestureRecognizer(dismissTap)
         view.backgroundColor = Palette.background
-        title = "New Session"
-        navigationItem.leftBarButtonItem = UIBarButtonItem(systemItem: .close, primaryAction: UIAction { [weak self] _ in
-            self?.dismiss(animated: true)
-        })
+        title = embedded ? nil : "New Session"
+        if !embedded {
+            navigationItem.leftBarButtonItem = UIBarButtonItem(systemItem: .close, primaryAction: UIAction { [weak self] _ in
+                self?.dismiss(animated: true)
+            })
+        }
 
         mark.image = BrandMarks.image(for: draft.harness, side: 34)
         mark.tintColor = Palette.text
         mark.contentMode = .center
         hero.text = "What are we building?"
+        hero.numberOfLines = 2
         hero.font = Fonts.ui(.sansSemibold, 22)
         hero.textColor = Palette.text
         hero.textAlignment = .center
@@ -101,13 +108,34 @@ final class NewSessionViewController: UIViewController, UIGestureRecognizerDeleg
         }
         composer.onSend = { [weak self] text, images, _ in self?.create(text: text, images: images) }
         view.addSubview(composer)
-        NSLayoutConstraint.activate([
-            heroStack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            heroStack.centerYAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerYAnchor, constant: -60),
-            composer.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 12),
-            composer.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -12),
-            composer.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor, constant: -8),
-        ])
+        heroStack.leadingAnchor.constraint(greaterThanOrEqualTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 24).isActive = true
+        if embedded {
+            // iPad draft (t3): the composer sits mid-column at the message
+            // width (768pt), the headline 32pt above it; the keyboard pushes
+            // it up.
+            let centered = composer.centerYAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerYAnchor, constant: 40)
+            centered.priority = .defaultHigh
+            let fill = composer.widthAnchor.constraint(equalTo: view.safeAreaLayoutGuide.widthAnchor, constant: -40)
+            fill.priority = .defaultHigh
+            hero.font = Fonts.ui(.sansSemibold, 28)
+            NSLayoutConstraint.activate([
+                composer.centerXAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerXAnchor),
+                composer.widthAnchor.constraint(lessThanOrEqualToConstant: 768),
+                fill,
+                centered,
+                composer.bottomAnchor.constraint(lessThanOrEqualTo: view.keyboardLayoutGuide.topAnchor, constant: -16),
+                heroStack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+                heroStack.bottomAnchor.constraint(equalTo: composer.topAnchor, constant: -32),
+            ])
+        } else {
+            NSLayoutConstraint.activate([
+                heroStack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+                heroStack.centerYAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerYAnchor, constant: -60),
+                composer.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 12),
+                composer.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -12),
+                composer.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor, constant: -8),
+            ])
+        }
         if draft.projectId == nil, draft.hostId == nil { draft.projectId = app.projectOptions.first?.id }
         if draft.projectId == nil, draft.hostId == nil {
             // No projects yet: run on the first reachable host.
@@ -123,7 +151,9 @@ final class NewSessionViewController: UIViewController, UIGestureRecognizerDeleg
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        composer.becomeFirstResponder()
+        // The sheet focuses at once; the iPad draft waits for a tap (its
+        // on-screen keyboard would cover half the column).
+        if !embedded { composer.becomeFirstResponder() }
     }
 
     @objc private func dismissKeyboard() {
@@ -163,6 +193,8 @@ final class NewSessionViewController: UIViewController, UIGestureRecognizerDeleg
             "effort": { [weak self] in self?.effortMenu() },
         ]
         mark.image = BrandMarks.image(for: draft.harness, side: 34)
+        // t3's draft headline names the project.
+        hero.text = project.map { "What should we build in \($0.name)?" } ?? "What are we building?"
     }
 
     private func projectMenu() -> UIMenu {

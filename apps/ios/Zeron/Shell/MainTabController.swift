@@ -3,7 +3,7 @@ import UIKit
 /// Root: native tab bar (Liquid Glass comes from the system, so tab switches,
 /// minimize-on-scroll and the search morph are render-server animations), with
 /// the "Ask anything" composer as the tab bar's bottom accessory.
-final class MainTabController: UITabBarController, UITabBarControllerDelegate {
+final class MainTabController: UITabBarController, UITabBarControllerDelegate, AppRouter {
     private let app: AppModel
 
     init(app: AppModel) {
@@ -87,6 +87,14 @@ final class MainTabController: UITabBarController, UITabBarControllerDelegate {
             sheet.prefersGrabberVisible = true
         }
         present(nav, animated: true)
+    }
+
+    func showSettings() {
+        selectedTab = tabs.first { $0.identifier == "more" }
+    }
+
+    func showSearch() {
+        selectedTab = tabs.first { $0 is UISearchTab }
     }
 
     /// Push a session on the Sessions tab (from new-session, deep links, search).

@@ -35,6 +35,8 @@ final class SessionViewController: UIViewController, UIGestureRecognizerDelegate
         view.backgroundColor = Palette.background
         navigationItem.largeTitleDisplayMode = .never
         navigationItem.titleView = titleView
+        applyHeaderStyle()
+        registerForTraitChanges([UITraitHorizontalSizeClass.self]) { (self: SessionViewController, _) in self.applyHeaderStyle() }
         navigationItem.rightBarButtonItem = UIBarButtonItem(image: UIImage(systemName: "ellipsis"), menu: sessionMenu())
 
         list.frame = view.bounds
@@ -118,10 +120,10 @@ final class SessionViewController: UIViewController, UIGestureRecognizerDelegate
         view.addSubview(jump)
 
         NSLayoutConstraint.activate([
-            // Full width on phones; a centered 760pt column on iPad/landscape.
+            // Full width on phones; t3's centered 768pt column on iPad/landscape.
             bottom.centerXAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerXAnchor),
             bottom.leadingAnchor.constraint(greaterThanOrEqualTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 12),
-            bottom.widthAnchor.constraint(lessThanOrEqualToConstant: 784),
+            bottom.widthAnchor.constraint(lessThanOrEqualToConstant: 768),
             {
                 let fill = bottom.widthAnchor.constraint(equalTo: view.safeAreaLayoutGuide.widthAnchor, constant: -24)
                 fill.priority = .defaultHigh
@@ -194,6 +196,14 @@ final class SessionViewController: UIViewController, UIGestureRecognizerDelegate
             engine.close()
             app.markSeen(chatId)
         }
+    }
+
+    /// Beside the iPad sidebar the header is t3's: leading breadcrumb
+    /// ("project / title") instead of a centered two-line title.
+    private func applyHeaderStyle() {
+        let split = splitViewController != nil && traitCollection.horizontalSizeClass == .regular
+        navigationItem.style = split ? .editor : .navigator
+        titleView.breadcrumb = split
     }
 
     @objc private func dismissComposer() {
@@ -341,6 +351,19 @@ final class SessionViewController: UIViewController, UIGestureRecognizerDelegate
 final class SessionTitleView: UIView {
     private let title = FadingLabel()
     private let subtitle = FadingLabel()
+    /// iPad split (t3 header): one leading line — "project / title".
+    private let crumb = FadingLabel()
+    private var stack: UIStackView!
+    private var widthCap: NSLayoutConstraint!
+    var breadcrumb = false {
+        didSet {
+            guard breadcrumb != oldValue else { return }
+            stack.isHidden = breadcrumb
+            crumb.isHidden = !breadcrumb
+            widthCap.constant = breadcrumb ? 620 : 240
+            render()
+        }
+    }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -350,19 +373,43 @@ final class SessionTitleView: UIView {
         subtitle.font = Fonts.ui(.sans, 12)
         subtitle.textColor = Palette.secondary
         subtitle.fitsAlignment = .center
-        let stack = UIStackView(arrangedSubviews: [title, subtitle])
+        stack = UIStackView(arrangedSubviews: [title, subtitle])
         stack.axis = .vertical
         stack.alignment = .center
         stack.spacing = 1
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
+        crumb.isHidden = true
+        crumb.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(crumb)
+        widthCap = widthAnchor.constraint(lessThanOrEqualToConstant: 240)
         NSLayoutConstraint.activate([
             stack.topAnchor.constraint(equalTo: topAnchor),
             stack.bottomAnchor.constraint(equalTo: bottomAnchor),
             stack.leadingAnchor.constraint(equalTo: leadingAnchor),
             stack.trailingAnchor.constraint(equalTo: trailingAnchor),
-            widthAnchor.constraint(lessThanOrEqualToConstant: 240),
+            crumb.leadingAnchor.constraint(equalTo: leadingAnchor),
+            crumb.trailingAnchor.constraint(equalTo: trailingAnchor),
+            crumb.centerYAnchor.constraint(equalTo: centerYAnchor),
+            widthCap,
         ])
+    }
+
+    override var intrinsicContentSize: CGSize {
+        guard breadcrumb else { return super.intrinsicContentSize }
+        return CGSize(width: min(620, ceil(crumb.sizeThatFits(CGSize(width: 2000, height: 30)).width)), height: 30)
+    }
+
+    private func render() {
+        let project = (subtitle.text ?? "").components(separatedBy: " @ ").first ?? ""
+        let text = NSMutableAttributedString()
+        if !project.isEmpty {
+            text.append(NSAttributedString(string: project, attributes: [.font: Fonts.ui(.sans, 14), .foregroundColor: Palette.secondary]))
+            text.append(NSAttributedString(string: "  /  ", attributes: [.font: Fonts.ui(.sans, 14), .foregroundColor: Palette.tertiary]))
+        }
+        text.append(NSAttributedString(string: title.text ?? "", attributes: [.font: Fonts.ui(.sansMedium, 14), .foregroundColor: Palette.text]))
+        crumb.attributedText = text
+        invalidateIntrinsicContentSize()
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -371,6 +418,7 @@ final class SessionTitleView: UIView {
         title.text = t
         subtitle.text = s
         subtitle.isHidden = s.isEmpty
+        if breadcrumb { render() }
     }
 }
 

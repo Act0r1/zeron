@@ -27,21 +27,24 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         }
         window.makeKeyAndVisible()
 
-        if let tabs = window.rootViewController as? MainTabController, let i = args.firstIndex(of: "-route"), i + 1 < args.count {
+        if let router = window.rootViewController as? AppRouter, let i = args.firstIndex(of: "-route"), i + 1 < args.count {
             let route = args[i + 1]
             DispatchQueue.main.async {
-                if route.hasPrefix("chat:") { tabs.openSession(String(route.dropFirst(5))) }
-                if route == "new" { tabs.presentNewSession() }
-                if let tab = ["more", "search"].first(where: { route == $0 }) {
-                    tabs.selectedTab = tabs.tabs.first { $0.identifier == tab } ?? tabs.tabs.last
-                }
+                if route.hasPrefix("chat:") { router.openSession(String(route.dropFirst(5))) }
+                if route == "new" { router.presentNewSession(prompt: nil) }
+                if route == "more" { router.showSettings() }
+                if route == "search" { router.showSearch() }
             }
         }
     }
 
     private func showRoot(animated: Bool) {
         guard let window else { return }
-        let root: UIViewController = app.isSignedIn ? MainTabController(app: app) : SignInViewController(app: app)
+        // iPad gets the t3-style split shell (it collapses to the tab shell
+        // at compact widths); iPhone the tab shell directly.
+        let root: UIViewController = !app.isSignedIn
+            ? SignInViewController(app: app)
+            : UIDevice.current.userInterfaceIdiom == .pad ? SplitRootController(app: app) : MainTabController(app: app)
         guard animated, window.rootViewController != nil else {
             window.rootViewController = root
             return

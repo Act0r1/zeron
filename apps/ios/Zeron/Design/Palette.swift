@@ -11,6 +11,10 @@ enum Palette {
 
     // Zeron Light / Zeron Dark (crates/theme builtins): cool neutrals, violet accent.
     static let background = dynamic(0xF3F3F5, 0x060606)
+    /// iPad sidebar surface (t3: a step off the page — zinc-50 / bg + 3% white).
+    static let sidebar = dynamic(0xEBEBEE, 0x0E0E0F)
+    /// The open session's row in the sidebar (t3 `sidebar-row-active`).
+    static let rowActive = dual(UIColor(white: 1, alpha: 0.9), UIColor(white: 1, alpha: 0.06))
     static let elevated = dynamic(0xFFFFFF, 0x111113)
     static let text = dynamic(0x27272C, 0xE8E8EA)
     static let secondary = dynamic(0x62626A, 0xA9A9AE)
@@ -40,7 +44,7 @@ enum Palette {
     /// Desktop sidebar "subline": `text_muted` @ 0.5 (project label, branch).
     static let subline = dynamic(0x62626A, 0xA9A9AE, alpha: 0.5)
 
-    private static func dual(_ light: UIColor, _ dark: UIColor) -> UIColor {
+    static func dual(_ light: UIColor, _ dark: UIColor) -> UIColor {
         UIColor { $0.userInterfaceStyle == .dark ? dark : light }
     }
 
