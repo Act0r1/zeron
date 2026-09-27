@@ -85,19 +85,28 @@ class FadingScrollView: UIScrollView {
     }
 }
 
-/// Content fading into the background at a screen edge (below the composer):
-/// clear at the top of the view → background, eased so there's no visible
-/// band. Pass-through for touches; a plain gradient layer, so it composites
-/// for free while content scrolls underneath.
+/// Content fading into the background at a screen edge: clear on the inner
+/// side → background at the edge (the bottom: below the composer; the top:
+/// behind the nav bar), eased so there's no visible band. Pass-through for
+/// touches; a plain gradient layer, so it composites for free while content
+/// scrolls underneath.
 final class EdgeFadeOverlay: UIView {
+    enum Edge { case top, bottom }
+
+    /// The ramp's length in points (the rest of the overlay is solid);
+    /// nil: it spans the first ~55% of the overlay.
+    var fadeLength: CGFloat? {
+        didSet { setNeedsLayout() }
+    }
+
     override class var layerClass: AnyClass { CAGradientLayer.self }
     private var gradient: CAGradientLayer { layer as! CAGradientLayer }
 
-    override init(frame: CGRect) {
-        super.init(frame: frame)
+    init(edge: Edge = .bottom) {
+        super.init(frame: .zero)
         isUserInteractionEnabled = false
-        gradient.startPoint = CGPoint(x: 0.5, y: 0)
-        gradient.endPoint = CGPoint(x: 0.5, y: 1)
+        gradient.startPoint = CGPoint(x: 0.5, y: edge == .bottom ? 0 : 1)
+        gradient.endPoint = CGPoint(x: 0.5, y: edge == .bottom ? 1 : 0)
         restyle()
         registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: EdgeFadeOverlay, _) in self.restyle() }
     }
@@ -109,11 +118,22 @@ final class EdgeFadeOverlay: UIView {
         if window != nil { restyle() }
     }
 
+    /// Smoothstep-ish ramp over the first ~55%, then solid.
+    private static let stops: [(CGFloat, CGFloat)] = [(0, 0), (0.12, 0.18), (0.24, 0.5), (0.36, 0.82), (0.46, 0.96), (0.55, 1), (1, 1)]
+
     private func restyle() {
         let bg = Palette.background.resolvedColor(with: traitCollection)
-        // Smoothstep-ish ramp over the first ~45%, then solid.
-        let stops: [(CGFloat, CGFloat)] = [(0, 0), (0.12, 0.18), (0.24, 0.5), (0.36, 0.82), (0.46, 0.96), (0.55, 1), (1, 1)]
-        gradient.colors = stops.map { bg.withAlphaComponent($0.1).cgColor }
-        gradient.locations = stops.map { NSNumber(value: Double($0.0)) }
+        gradient.colors = Self.stops.map { bg.withAlphaComponent($0.1).cgColor }
+        layoutStops()
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        layoutStops()
+    }
+
+    private func layoutStops() {
+        let scale = fadeLength.map { bounds.height > 0 ? min(1, $0 / bounds.height) / 0.55 : 1 } ?? 1
+        gradient.locations = Self.stops.map { NSNumber(value: Double($0.0 == 1 ? 1 : min(1, $0.0 * scale))) }
     }
 }

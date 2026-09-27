@@ -57,8 +57,24 @@ final class SessionViewController: UIViewController, UIGestureRecognizerDelegate
         dismissTap.delegate = self
         list.addGestureRecognizer(dismissTap)
         setContentScrollView(list, for: .top)
-        list.topEdgeEffect.style = .soft
+        // Our own top fade instead of the system edge effect: the nav bar
+        // only attaches that once a push has finished, so opening a session
+        // showed the transcript under the title, unfaded, for the whole
+        // transition before the fade snapped in. The overlay is there from
+        // the first frame (and matches the bottom fade).
+        list.topEdgeEffect.isHidden = true
         list.bottomEdgeEffect.isHidden = true
+        // Solid behind the bar (nothing reads through the title), easing
+        // out just below it.
+        topFade.fadeLength = 40
+        topFade.translatesAutoresizingMaskIntoConstraints = false
+        view.insertSubview(topFade, aboveSubview: list)
+        NSLayoutConstraint.activate([
+            topFade.topAnchor.constraint(equalTo: view.topAnchor),
+            topFade.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            topFade.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            topFade.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 32),
+        ])
 
         composer.attachMenu = { [weak self] in
             guard let self else { return UIMenu() }
@@ -210,7 +226,6 @@ final class SessionViewController: UIViewController, UIGestureRecognizerDelegate
         super.viewDidAppear(animated)
         hasAppeared = true
         (splitViewController as? SplitRootController)?.sessionDidAppear(chatId)
-        list.settleEdgeEffect()
         (tabBarController as? MainTabController)?.syncAccessory()
     }
 
@@ -280,6 +295,7 @@ final class SessionViewController: UIViewController, UIGestureRecognizerDelegate
     }
 
     private let bottomFade = EdgeFadeOverlay()
+    private let topFade = EdgeFadeOverlay(edge: .top)
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
