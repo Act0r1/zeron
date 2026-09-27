@@ -134,6 +134,19 @@ final class SessionFlowTests: XCTestCase {
         }
     }
 
+    /// Tapping a link in the transcript opens it (in-app Safari for web).
+    func testTappingLinkOpensIt() {
+        let app = launch(["-route", "chat:chat-cjk"])
+        XCTAssertTrue(app.scrollViews["transcript"].waitForExistence(timeout: 10))
+        let link = app.descendants(matching: .any).matching(NSPredicate(format: "identifier == 'transcript-link' AND value CONTAINS 'wikipedia'")).firstMatch
+        XCTAssertTrue(link.waitForExistence(timeout: 10), "link exposed")
+        for _ in 0..<4 where !link.isHittable { app.scrollViews["transcript"].swipeUp() }
+        link.tap()
+        // SFSafariViewController's toolbar.
+        XCTAssertTrue(app.buttons["Done"].waitForExistence(timeout: 8) || app.buttons["Close"].waitForExistence(timeout: 1), "link opened")
+        snapshot(app, "link-opened")
+    }
+
     func testTabsAndSearch() {
         let app = launch()
         XCTAssertTrue(app.staticTexts["Sessions"].waitForExistence(timeout: 10))
