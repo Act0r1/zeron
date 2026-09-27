@@ -10,7 +10,7 @@ protocol AppRouter: AnyObject {
 }
 
 /// iPad shell: Zeron mobile with a sidebar. The sidebar is the phone's
-/// Sessions page (same rows, sections, wallpaper, "New session" capsule);
+/// Sessions page (same rows, sections, wallpaper), new session top-left;
 /// the main column shows the open session or the phone's new-session page.
 /// Compact widths (Slide Over, narrow Split View) collapse to the iPhone tab
 /// shell.
@@ -136,17 +136,13 @@ final class SplitRootController: UISplitViewController, UISplitViewControllerDel
 }
 
 /// The iPad sidebar: the phone's Sessions page in its own navigation stack
-/// (sections, folders, Archived push inside it), search in the bar, Settings
-/// beside the options menu, and the "New session" capsule floating at the
-/// bottom as the tab bar's accessory does on iPhone.
+/// (sections, folders, Archived push inside it): new session top-left,
+/// Settings beside the options menu, search in the bar.
 final class SidebarViewController: UIViewController, UISearchResultsUpdating {
     private let app: AppModel
     private let list: SessionsViewController
     private let nav: UINavigationController
     private let search = UISearchController(searchResultsController: nil)
-    private let capsule = Glass.surface(interactive: true)
-    private lazy var accessory = AskAnythingAccessory { [weak self] in self?.router?.presentNewSession(prompt: nil) }
-    private var liveToken: AnyObject?
 
     var currentChatId: String? {
         get { list.currentChatId }
@@ -187,22 +183,12 @@ final class SidebarViewController: UIViewController, UISearchResultsUpdating {
         settings.accessibilityIdentifier = "sidebar-settings"
         list.navigationItem.rightBarButtonItems = [list.navigationItem.rightBarButtonItem, settings].compactMap { $0 }
 
-        capsule.contentView.addSubview(accessory)
-        accessory.translatesAutoresizingMaskIntoConstraints = false
-        capsule.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(capsule)
-        NSLayoutConstraint.activate([
-            accessory.topAnchor.constraint(equalTo: capsule.contentView.topAnchor),
-            accessory.bottomAnchor.constraint(equalTo: capsule.contentView.bottomAnchor),
-            accessory.leadingAnchor.constraint(equalTo: capsule.contentView.leadingAnchor),
-            accessory.trailingAnchor.constraint(equalTo: capsule.contentView.trailingAnchor),
-            capsule.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
-            capsule.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
-            capsule.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -8),
-            capsule.heightAnchor.constraint(equalToConstant: 48),
-        ])
-        // The list scrolls up past the capsule.
-        nav.additionalSafeAreaInsets.bottom = 48 + 16
+        let compose = UIBarButtonItem(image: UIImage(systemName: "square.and.pencil"), primaryAction: UIAction { [weak self] _ in
+            self?.router?.presentNewSession(prompt: nil)
+        })
+        compose.accessibilityLabel = "New session"
+        compose.accessibilityIdentifier = "new-session"
+        list.navigationItem.leftBarButtonItem = compose
 
         // A hairline between the sidebar and the main column.
         let edge = UIView()
@@ -215,12 +201,6 @@ final class SidebarViewController: UIViewController, UISearchResultsUpdating {
             edge.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             edge.widthAnchor.constraint(equalToConstant: 1 / max(1, traitCollection.displayScale)),
         ])
-
-        accessory.update(app.live)
-        liveToken = app.observe { [weak self] in
-            guard let self else { return }
-            self.accessory.update(self.app.live)
-        }
     }
 
     func updateSearchResults(for searchController: UISearchController) {
