@@ -362,6 +362,7 @@ final class NewSessionViewController: UIViewController, UIGestureRecognizerDeleg
             return false
         }
         created = true
+        PushNotifications.shared.askAfterFirstSession()
         app.newSessionText = ""
         app.newSessionImages = []
         // Lift the draft out (page + composer + typed text) so the chat can

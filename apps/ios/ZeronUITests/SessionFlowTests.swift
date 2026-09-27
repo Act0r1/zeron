@@ -147,6 +147,40 @@ final class SessionFlowTests: XCTestCase {
         snapshot(app, "link-opened")
     }
 
+    /// Settings turns notifications on (system prompt), and tapping a
+    /// session notification opens that session. The notification is sent
+    /// from the host (`xcrun simctl push`, same payload as the edge) once the
+    /// test signals it's in the background via /tmp/zeron-push-ready.
+    func testNotificationTapOpensSession() throws {
+        // Needs a host-side sender (see the comment above); skip without one.
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: "/tmp/zeron-push-host"), "no host push sender")
+        let ready = "/tmp/zeron-push-ready"
+        try? FileManager.default.removeItem(atPath: ready)
+        let app = launch()
+        XCTAssertTrue(app.tabBars.buttons["Settings"].waitForExistence(timeout: 10))
+        app.tabBars.buttons["Settings"].tap()
+        let toggle = app.switches["toggle-notify:enabled"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+        if (toggle.value as? String) != "1" {
+            toggle.tap()
+            let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+            let allow = springboard.buttons["Allow"]
+            if allow.waitForExistence(timeout: 5) { allow.tap() }
+        }
+        XCTAssertTrue(app.switches["toggle-notify:done"].waitForExistence(timeout: 5), "kinds shown once on")
+        snapshot(app, "notification-settings")
+        XCUIDevice.shared.press(.home)
+        FileManager.default.createFile(atPath: ready, contents: Data())
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let banner = springboard.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS 'Run finished'")).firstMatch
+        guard banner.waitForExistence(timeout: 45) else {
+            throw XCTSkip("no notification delivered (host didn't push)")
+        }
+        banner.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Wrangler deploy hygiene'")).firstMatch.waitForExistence(timeout: 10), "tapped session opened")
+        snapshot(app, "notification-opened")
+    }
+
     func testTabsAndSearch() {
         let app = launch()
         XCTAssertTrue(app.staticTexts["Sessions"].waitForExistence(timeout: 10))
