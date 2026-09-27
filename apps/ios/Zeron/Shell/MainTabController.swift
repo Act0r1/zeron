@@ -43,9 +43,21 @@ final class MainTabController: UITabBarController, UITabBarControllerDelegate, A
         }
     }
 
-    /// Search has its own bottom field; the composer accessory steps aside.
+    /// The accessory stays attached across tab switches, search included —
+    /// the system carries it through the search morph (above the field, then
+    /// under the keyboard). Taking it off for search and adding it back on
+    /// the way out made the tab bar reflow mid-morph (pill and icons out of
+    /// step for several frames). Leaving search, the shrinking field crosses
+    /// the accessory for a couple of frames, so its content fades back in
+    /// just after.
     func tabBarController(_ tabBarController: UITabBarController, didSelectTab selectedTab: UITab, previousTab: UITab?) {
-        setAccessoryVisible(!(selectedTab is UISearchTab), animated: true)
+        syncAccessory()
+        guard previousTab is UISearchTab, !(selectedTab is UISearchTab), bottomAccessory != nil,
+              !UIAccessibility.isReduceMotionEnabled else { return }
+        accessoryContent.alpha = 0
+        UIView.animate(withDuration: 0.25, delay: 0.12, options: [.curveEaseOut, .allowUserInteraction]) {
+            self.accessoryContent.alpha = 1
+        }
     }
 
     private lazy var accessoryContent = AskAnythingAccessory { [weak self] in self?.presentNewSession() }
@@ -53,10 +65,10 @@ final class MainTabController: UITabBarController, UITabBarControllerDelegate, A
     private var liveToken: AnyObject?
 
     /// Accessory state from what's on screen: hidden over a session (it has
-    /// its own composer) and on the search tab.
-    func syncAccessory() {
+    /// its own composer).
+    func syncAccessory(animated: Bool = false) {
         let top = (selectedTab?.viewController as? UINavigationController)?.topViewController
-        setAccessoryVisible(!(top is SessionViewController), animated: false)
+        setAccessoryVisible(!(top is SessionViewController), animated: animated)
     }
 
     /// Pushed sessions carry their own composer; the accessory steps aside.
@@ -65,7 +77,7 @@ final class MainTabController: UITabBarController, UITabBarControllerDelegate, A
     /// flew in from the top of the screen), content transparent so it can
     /// fade in with the gesture.
     func prepareAccessoryForReveal() {
-        guard bottomAccessory == nil, !(selectedTab is UISearchTab) else { return }
+        guard bottomAccessory == nil else { return }
         UIView.performWithoutAnimation {
             setBottomAccessory(accessory, animated: false)
             view.layoutIfNeeded()
@@ -85,7 +97,7 @@ final class MainTabController: UITabBarController, UITabBarControllerDelegate, A
     }
 
     func setAccessoryVisible(_ visible: Bool, animated: Bool) {
-        let target = visible && !(selectedTab is UISearchTab) ? accessory : nil
+        let target = visible ? accessory : nil
         guard bottomAccessory !== target else { return }
         setBottomAccessory(target, animated: animated)
     }

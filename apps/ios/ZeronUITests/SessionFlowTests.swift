@@ -114,6 +114,26 @@ final class SessionFlowTests: XCTestCase {
         jump.tap()
     }
 
+    /// Search → back to Sessions / Settings (recorded for the accessory
+    /// transition).
+    func testSearchTabRoundTrip() {
+        let app = launch()
+        XCTAssertTrue(app.staticTexts["Sessions"].waitForExistence(timeout: 10))
+        let accessory = app.buttons["new-session"]
+        XCTAssertTrue(accessory.waitForExistence(timeout: 5))
+        for back in ["Sessions", "Settings"] {
+            app.tabBars.buttons[back].tap()
+            sleep(1)
+            app.tabBars.buttons["Search"].tap()
+            sleep(2)
+            // Close beside the field leaves search for the tab you came from.
+            app.buttons["Close"].firstMatch.tap()
+            sleep(2)
+            XCTAssertTrue(accessory.waitForExistence(timeout: 5), "accessory back after search")
+            XCTAssertTrue(accessory.isHittable, "accessory usable after search")
+        }
+    }
+
     func testTabsAndSearch() {
         let app = launch()
         XCTAssertTrue(app.staticTexts["Sessions"].waitForExistence(timeout: 10))
