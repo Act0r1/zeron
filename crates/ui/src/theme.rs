@@ -1392,6 +1392,13 @@ impl Theme {
                 Self::from_variant(&variant, AccentSelection::ThemeDefault, surface_preference);
             theme.accent_selection = accent_selection;
             theme.wallpaper_color = Some(color);
+            if theme.surface_treatment == SurfaceTreatment::Frosted {
+                // Glass interactions lift toward white rather than laying a
+                // dark wallpaper accent over the translucent surface.
+                theme.element_hover = gpui::white().opacity(0.09);
+                theme.element_active = gpui::white().opacity(0.15);
+                theme.band = theme.element_hover;
+            }
             theme
         } else {
             Self::from_variant(variant, accent_selection, surface_preference)
@@ -2096,6 +2103,27 @@ mod tests {
         assert_eq!(light.busy, light.accent);
         assert_eq!(light.glyph.mid, light.accent);
         assert_eq!(light.caret, light.accent);
+    }
+
+    #[test]
+    fn wallpaper_glass_interactions_lift_toward_white_in_both_appearances() {
+        for (appearance, id) in [
+            (Appearance::Dark, "zeron-dark"),
+            (Appearance::Light, "zeron-light"),
+        ] {
+            let theme = Theme::for_selection_with_wallpaper(
+                appearance,
+                id,
+                AccentSelection::ThemeDefault,
+                SurfacePreference::Frosted,
+                Some(ModelColor::rgb(20, 60, 140)),
+            );
+            for wash in [theme.element_hover, theme.element_active] {
+                assert_eq!(wash.l, 1.0);
+                assert_eq!(wash.s, 0.0);
+                assert!(wash.a > 0.0 && wash.a < 1.0);
+            }
+        }
     }
 
     #[test]

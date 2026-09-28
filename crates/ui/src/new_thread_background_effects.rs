@@ -22,14 +22,10 @@ pub(crate) struct ArtworkFrame {
     pub active: bool,
 }
 
-const CROSSFADE_SECONDS: f32 = 0.18;
-
 fn crossfade_mix(start: Instant, now: Instant) -> f32 {
-    let t = (now.saturating_duration_since(start).as_secs_f32()
-        / (CROSSFADE_SECONDS * crate::motion::speed_scale()))
-    .clamp(0.0, 1.0);
-    // Fast attack with a soft landing, rather than easing in from rest.
-    1.0 - (1.0 - t).powi(3)
+    let spec = crate::motion::WALLPAPER_CROSSFADE;
+    let duration = spec.total().mul_f32(crate::motion::speed_scale());
+    spec.progress(now.saturating_duration_since(start).as_secs_f32() / duration.as_secs_f32())
 }
 
 impl Readiness {
@@ -422,7 +418,9 @@ mod tests {
         assert_eq!(start.previous.unwrap().id, first.id);
         let halfway = now
             + std::time::Duration::from_secs_f32(
-                CROSSFADE_SECONDS * crate::motion::speed_scale() * 0.5,
+                crate::motion::WALLPAPER_CROSSFADE.total().as_secs_f32()
+                    * crate::motion::speed_scale()
+                    * 0.5,
             );
         let frame = ready.frame(Some(latest.clone()), true, false, halfway);
         assert!((frame.mix - 0.875).abs() < 0.001);

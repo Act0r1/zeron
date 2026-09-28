@@ -50,10 +50,10 @@ fn choose(
         (recency, *rank)
     });
     for (_, path) in candidates {
-        if let Ok(staged) = crate::attachments::stage_file(&path) {
-            if crate::new_thread_background_image::decode(staged.bytes()).is_ok() {
-                return Ok((path, staged));
-            }
+        if let Ok(staged) = crate::attachments::stage_file(&path)
+            && crate::new_thread_background_image::decode(staged.bytes()).is_ok()
+        {
+            return Ok((path, staged));
         }
     }
     Err("No readable wallpapers found in this folder. Add images such as PNG or JPEG, or choose another folder.".into())
