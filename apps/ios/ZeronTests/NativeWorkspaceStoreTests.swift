@@ -12,7 +12,7 @@ final class NativeWorkspaceStoreTests: XCTestCase {
         do { try await store.writeFile("/workspace/link/escape", content: "bad"); XCTFail("Symlink accepted") } catch {}
         XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("escape").path))
         try FileManager.default.removeItem(at: root.appendingPathComponent("workspace.files/link"))
-        do { try await store.writeFile("/workspace/saved.txt", content: String(repeating: "x", count: NativeWorkspaceFiles.maxBytes + 1)); XCTFail("Quota accepted") } catch {}
+        do { try await store.writeFile("/workspace/saved.txt", content: String(repeating: "x", count: NativeWorkspaceFiles.maxFileBytes + 1)); XCTFail("Quota accepted") } catch {}
         let saved = try await store.readFile("/workspace/saved.txt")
         XCTAssertEqual(saved, "keep")
         try await store.beginCommand("old")

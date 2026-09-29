@@ -40,7 +40,7 @@ actor NativeWorkspaceStore {
         guard path.hasPrefix("/"), !path.contains("\0") else { throw failure("Invalid workspace path") }
         if path == "/" { return directory }
         let pieces = path.dropFirst().split(separator: "/", omittingEmptySubsequences: false)
-        guard pieces.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }) else { throw failure("Invalid workspace path") }
+        guard pieces.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." && $0.lowercased() != ".git" }) else { throw failure("Invalid workspace path") }
         var result = directory
         for piece in pieces {
             result.appendPathComponent(String(piece))
@@ -61,6 +61,7 @@ actor NativeWorkspaceStore {
         let rootComponents = root.pathComponents
         guard let enumerator = fm.enumerator(at: root, includingPropertiesForKeys: [.isSymbolicLinkKey], errorHandler: { _, error in scanError = error; return false }) else { throw failure("Could not read workspace") }
         while let child = enumerator.nextObject() as? URL {
+            if child.lastPathComponent.lowercased() == ".git" { enumerator.skipDescendants(); continue }
             guard try child.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink != true else { throw failure("Symbolic links are not supported") }
             let components = child.standardizedFileURL.pathComponents
             guard components.starts(with: rootComponents), components.count > rootComponents.count else { throw failure("Invalid workspace entry path") }
@@ -81,6 +82,7 @@ actor NativeWorkspaceStore {
     }
 
     private func checkCapacity(replacing target: URL? = nil, bytes: Int = 0, extraEntries: Int = 0) throws {
+        guard bytes <= NativeWorkspaceFiles.maxFileBytes else { throw failure("A file exceeds the 16 MB limit") }
         let paths = try inventory()
         var total = bytes
         for path in paths {
@@ -89,13 +91,59 @@ actor NativeWorkspaceStore {
             let info = try metadata(file)
             if info["isFile"] as? Bool == true { total += info["size"] as? Int ?? 0 }
         }
-        guard total <= NativeWorkspaceFiles.maxBytes else { throw failure("Workspace exceeds the 8 MB limit") }
-        guard paths.count - 1 + extraEntries <= NativeWorkspaceFiles.maxEntries else { throw failure("Workspace exceeds the 2,000-entry limit") }
+        guard total <= NativeWorkspaceFiles.maxBytes else { throw failure("Workspace exceeds the 128 MB limit") }
+        guard paths.count - 1 + extraEntries <= NativeWorkspaceFiles.maxEntries else { throw failure("Workspace exceeds the 20,000-entry limit") }
     }
 
     func beginCommand(_ id: String) throws { try prepare(); commandID = id; changes.removeAll() }
     func endCommand(_ id: String) { if commandID == id { commandID = nil } }
     func changedPaths() -> [String] { changes.sorted() }
+
+    func entries() throws -> [NativeWorkspaceEntry] {
+        try prepare()
+        return try inventory().filter { $0 != "/" }.map { path in
+            let info = try metadata(url(path))
+            return .init(path: "/workspace" + path, type: info["isFile"] as? Bool == true ? "file" : "directory", mode: info["mode"] as? Int ?? 420, size: info["size"] as? Int)
+        }
+    }
+
+    func data(_ path: String) throws -> Data {
+        try prepare()
+        return try Data(contentsOf: url("/" + NativeWorkspaceFiles.relativePath(path)), options: .mappedIfSafe)
+    }
+
+    /// Copy a consistent selection without materializing the workspace in memory.
+    func exportSelection(path: String?, to staging: URL) throws -> URL {
+        try prepare()
+        let relative = try path.map { "/" + (try NativeWorkspaceFiles.relativePath($0)) } ?? "/"
+        let source = try url(relative), info = try metadata(source)
+        let destination = staging.appendingPathComponent(path == nil ? "Workspace" : source.lastPathComponent)
+        try fm.createDirectory(at: staging, withIntermediateDirectories: true)
+        if info["isFile"] as? Bool == true { try fm.copyItem(at: source, to: destination); return destination }
+        try fm.createDirectory(at: destination, withIntermediateDirectories: true)
+        let prefix = relative == "/" ? "/" : relative + "/"
+        for name in try inventory() where name != "/" && name.hasPrefix(prefix) {
+            let from = try url(name), to = destination.appendingPathComponent(String(name.dropFirst(prefix.count)))
+            if try metadata(from)["isDirectory"] as? Bool == true { try fm.createDirectory(at: to, withIntermediateDirectories: true) }
+            else { try fm.copyItem(at: from, to: to) }
+        }
+        return destination
+    }
+
+    func git(_ args: [String], id: String) throws -> [String: Any] {
+        guard id == commandID else { throw failure("Command cancelled") }
+        try prepare()
+        let files = try entries()
+        let size = files.reduce(0) { $0 + ($1.type == "file" ? $1.size ?? 0 : 0) }
+        let request = try JSONSerialization.data(withJSONObject: ["root": directory.path, "args": args, "id": id, "available_bytes": max(0, NativeWorkspaceFiles.maxBytes - size), "available_entries": max(0, NativeWorkspaceFiles.maxEntries - files.count)])
+        let text = String(decoding: request, as: UTF8.self)
+        guard let pointer = text.withCString({ zeron_git_run($0) }) else { throw failure("Git returned no result") }
+        defer { zeron_codex_free(pointer) }
+        guard let result = try JSONSerialization.jsonObject(with: Data(String(cString: pointer).utf8)) as? [String: Any] else { throw failure("Invalid Git response") }
+        let before = Set(files.map(\.path))
+        for entry in try entries() where !before.contains(entry.path) { changes.insert(entry.path) }
+        return ["value": result, "paths": try inventory()]
+    }
 
     func snapshot() throws -> [NativeWorkspaceEntry] {
         try prepare()
@@ -106,12 +154,49 @@ actor NativeWorkspaceStore {
         }
     }
 
-    func importEntries(_ entries: [NativeWorkspaceEntry]) throws {
+    func importURLs(_ urls: [URL]) throws -> Int {
         try prepare()
-        let merged = try NativeWorkspaceFiles.merge(existing: snapshot(), incoming: entries)
+        let incoming = try NativeWorkspaceFiles.importPlan(urls), existing = try entries()
+        let old = Dictionary(uniqueKeysWithValues: existing.map { ($0.path, $0) })
+        for item in incoming {
+            if let previous = old[item.path], previous.type != "directory" || !item.directory { throw failure("An imported file already exists: \(item.path)") }
+        }
+        var total = existing.reduce(0) { $0 + ($1.type == "file" ? $1.size ?? 0 : 0) }
+        guard total + incoming.reduce(0, { $0 + $1.bytes }) <= NativeWorkspaceFiles.maxBytes,
+              Set(existing.map(\.path) + incoming.map(\.path)).count <= NativeWorkspaceFiles.maxEntries else { throw failure("Import exceeds workspace limits") }
         let stage = directory.deletingLastPathComponent().appendingPathComponent(UUID().uuidString)
         defer { try? fm.removeItem(at: stage) }
-        try NativeWorkspaceFiles.export(merged, to: stage)
+        try fm.copyItem(at: directory, to: stage)
+        for item in incoming {
+            let target = stage.appendingPathComponent(try NativeWorkspaceFiles.relativePath(item.path))
+            if item.directory { try fm.createDirectory(at: target, withIntermediateDirectories: true) }
+            else {
+                try fm.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try fm.copyItem(at: item.source, to: target)
+                let values = try target.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
+                let size = values.fileSize ?? 0; total += size
+                guard values.isRegularFile == true, values.isSymbolicLink != true, size <= NativeWorkspaceFiles.maxFileBytes, total <= NativeWorkspaceFiles.maxBytes else { throw failure("Imported file changed or exceeds limits") }
+            }
+        }
+        guard renameatx_np(AT_FDCWD, stage.path, AT_FDCWD, directory.path, UInt32(RENAME_SWAP)) == 0 else { throw failure("Could not commit imported workspace (\(errno))") }
+        incoming.forEach { changes.insert($0.path) }
+        return incoming.filter { !$0.directory }.count
+    }
+
+    func importEntries(_ entries: [NativeWorkspaceEntry]) throws {
+        try prepare()
+        let incoming = try NativeWorkspaceFiles.merge(existing: [], incoming: entries)
+        let existing = try self.entries()
+        let old = Dictionary(uniqueKeysWithValues: existing.map { ($0.path, $0) })
+        for entry in incoming {
+            if let previous = old[entry.path], previous.type != "directory" || entry.type != "directory" { throw failure("An imported file already exists: \(entry.path)") }
+        }
+        let bytes = existing.reduce(0) { $0 + ($1.type == "file" ? $1.size ?? 0 : 0) } + incoming.reduce(0) { $0 + (Data(base64Encoded: $1.content ?? "")?.count ?? 0) }
+        guard bytes <= NativeWorkspaceFiles.maxBytes, Set(existing.map(\.path) + incoming.map(\.path)).count <= NativeWorkspaceFiles.maxEntries else { throw failure("Import exceeds workspace limits") }
+        let stage = directory.deletingLastPathComponent().appendingPathComponent(UUID().uuidString)
+        defer { try? fm.removeItem(at: stage) }
+        try fm.copyItem(at: directory, to: stage)
+        try NativeWorkspaceFiles.export(incoming, to: stage)
         // Both directories are on the same app volume; swapping is atomic, including on crash.
         guard renameatx_np(AT_FDCWD, stage.path, AT_FDCWD, directory.path, UInt32(RENAME_SWAP)) == 0 else {
             throw failure("Could not commit imported workspace (\(errno))")
@@ -154,7 +239,7 @@ actor NativeWorkspaceStore {
             value = try Data(contentsOf: target).base64EncodedString()
         case "stat": value = try metadata(target)
         case "exists": value = fm.fileExists(atPath: target.path)
-        case "readdir": value = try fm.contentsOfDirectory(atPath: target.path).sorted()
+        case "readdir": value = try fm.contentsOfDirectory(atPath: target.path).filter { $0.lowercased() != ".git" }.sorted()
         case "writeFile", "appendFile":
             guard path != "/", let encoded = request["content"] as? String, let bytes = Data(base64Encoded: encoded) else { throw failure("Invalid file contents") }
             let exists = fm.fileExists(atPath: target.path)

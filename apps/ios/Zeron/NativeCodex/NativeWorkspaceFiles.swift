@@ -5,18 +5,20 @@ struct NativeWorkspaceEntry: Codable, Sendable {
     var type: String
     var mode: Int
     var content: String?
+    var size: Int? = nil
 }
 
 /// Project import/export works on copies. The Files provider's original is never edited.
 enum NativeWorkspaceFiles {
-    static let maxBytes = 8 * 1024 * 1024
-    static let maxEntries = 2000
+    static let maxBytes = 128 * 1024 * 1024
+    static let maxEntries = 20_000
+    static let maxFileBytes = 16 * 1024 * 1024
     static let excludedDirectories: Set<String> = [".git", "node_modules", ".build", "DerivedData"]
 
     static func relativePath(_ path: String) throws -> String {
         guard path.hasPrefix("/workspace/"), !path.contains("\0") else { throw failure("Invalid workspace path") }
         let relative = String(path.dropFirst(11))
-        guard !relative.isEmpty, relative.split(separator: "/", omittingEmptySubsequences: false).allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }) else { throw failure("Invalid workspace path") }
+        guard !relative.isEmpty, relative.split(separator: "/", omittingEmptySubsequences: false).allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." && $0.lowercased() != ".git" }) else { throw failure("Invalid workspace path") }
         return relative
     }
 
@@ -28,14 +30,51 @@ enum NativeWorkspaceFiles {
             if let old = entries[entry.path], old.type != "directory" || entry.type != "directory" { throw failure("\(entry.path) already exists. Import into an empty workspace or rename the file.") }
             entries[entry.path] = entry
         }
-        guard entries.count <= maxEntries else { throw failure("The workspace supports up to 2,000 entries") }
+        guard entries.count <= maxEntries else { throw failure("The workspace supports up to 20,000 entries") }
         var size = 0
         for entry in entries.values where entry.type == "file" {
             guard let content = entry.content, let data = Data(base64Encoded: content) else { throw failure("Invalid file data") }
-            size += data.count
+            guard data.count <= maxFileBytes else { throw failure("A file exceeds the 16 MB limit") }; size += data.count
         }
-        guard size <= maxBytes else { throw failure("The workspace supports up to 8 MB. Import a smaller project or selected source files.") }
+        guard size <= maxBytes else { throw failure("The workspace supports up to 128 MB. Import a smaller project or selected source files.") }
         return entries.values.sorted { $0.path < $1.path }
+    }
+
+    struct ImportItem: Sendable { let source: URL; let path: String; let directory: Bool; let bytes: Int }
+    /// Validate and inventory imports without reading their contents into memory.
+    static func importPlan(_ urls: [URL]) throws -> [ImportItem] {
+        var items: [ImportItem] = [], total = 0
+        func add(_ source: URL, relative: String) throws {
+            let values = try source.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
+            guard values.isSymbolicLink != true, values.isDirectory == true || values.isRegularFile == true else { throw failure("Unsupported imported file: \(relative)") }
+            _ = try relativePath("/workspace/" + relative)
+            let bytes = values.isDirectory == true ? 0 : values.fileSize ?? 0
+            total += bytes
+            guard bytes <= maxFileBytes, total <= maxBytes, items.count < maxEntries else { throw failure("Import exceeds workspace limits: 128 MB, 20,000 entries, 16 MB per file") }
+            items.append(.init(source: source, path: "/workspace/" + relative, directory: values.isDirectory == true, bytes: bytes))
+        }
+        for url in urls {
+            let values = try url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+            guard values.isSymbolicLink != true else { throw failure("Symbolic links are not supported") }
+            if values.isDirectory == true {
+                let root = url.resolvingSymlinksInPath().standardizedFileURL
+                var problem: Error?
+                guard let scan = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.isDirectoryKey], errorHandler: { _, error in problem = error; return false }) else { throw failure("Could not read imported folder") }
+                while let child = scan.nextObject() as? URL {
+                    if excludedDirectories.contains(child.lastPathComponent), try child.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true { scan.skipDescendants(); continue }
+                    let components = child.standardizedFileURL.pathComponents
+                    guard components.starts(with: root.pathComponents), components.count > root.pathComponents.count else { throw failure("Invalid import path") }
+                    try add(child, relative: components.dropFirst(root.pathComponents.count).joined(separator: "/"))
+                }
+                if let problem { throw problem }
+            } else { try add(url, relative: url.lastPathComponent) }
+        }
+        var seen: [String: Bool] = [:]
+        for item in items {
+            if let previous = seen[item.path], !previous || !item.directory { throw failure("Duplicate imported path: \(item.path)") }
+            seen[item.path] = item.directory
+        }
+        return items
     }
 
     static func collect(_ urls: [URL]) throws -> [NativeWorkspaceEntry] {
@@ -50,13 +89,13 @@ enum NativeWorkspaceFiles {
                 entries.append(.init(path: path, type: "directory", mode: 493))
             } else {
                 guard values.isRegularFile == true else { throw failure("Unsupported file: \(relative)") }
-                guard (values.fileSize ?? 0) <= maxBytes - bytes else { throw failure("This project exceeds the 8 MB workspace limit") }
+                guard (values.fileSize ?? 0) <= min(maxFileBytes, maxBytes - bytes) else { throw failure("This project exceeds the 128 MB workspace limit") }
                 let data = try Data(contentsOf: url)
                 bytes += data.count
-                guard bytes <= maxBytes else { throw failure("This project exceeds the 8 MB workspace limit") }
+                guard bytes <= maxBytes else { throw failure("This project exceeds the 128 MB workspace limit") }
                 entries.append(.init(path: path, type: "file", mode: 420, content: data.base64EncodedString()))
             }
-            guard entries.count <= maxEntries else { throw failure("This project exceeds the 2,000-entry workspace limit") }
+            guard entries.count <= maxEntries else { throw failure("This project exceeds the 20,000-entry workspace limit") }
         }
         for url in urls {
             let rootValues = try url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])

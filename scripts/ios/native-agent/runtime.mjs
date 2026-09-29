@@ -9,7 +9,7 @@ export const commands = [
   "mkdir", "touch", "cp", "mv", "rm", "basename", "dirname", "sleep",
 ];
 const limits = {
-  maxExecutionTimeMs: 5_000,
+  maxExecutionTimeMs: 60_000,
   maxLoopIterations: 10_000,
   maxCommandCount: 10_000,
   maxOutputSize: 256 * 1024,
@@ -47,10 +47,10 @@ export async function createRuntime(snapshot = [], nativeRequest) {
           if (native) await native.refresh();
           // A fresh interpreter prevents cwd/environment state leaking across tool calls.
           const customCommands = native ? [
-            ...[["render", "render"], ["import_image", "importImage"]].map(([name, method]) => defineCommand(name, async (args) => {
+            ...[["render", "render"], ["import_image", "importImage"], ["git", "git"], ["pdf", "pdf"], ["serve", "serve"]].map(([name, method]) => defineCommand(name, async (args, context) => {
               try {
-                const output = await native.call(method, "/", { args });
-                return { stdout: output + "\n", stderr: "", exitCode: 0 };
+                const output = await native.call(method, "/", { args, cwd: context.cwd });
+                return typeof output === "object" ? output : { stdout: output + "\n", stderr: "", exitCode: 0 };
               } catch (error) { return { stdout: "", stderr: String(error) + "\n", exitCode: 1 }; }
             })),
           ] : [];

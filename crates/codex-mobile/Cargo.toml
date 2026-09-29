@@ -20,6 +20,8 @@ codex-config = { path = "../../target/native-agent-spike/codex/codex-rs/config" 
 codex-core = { path = "../../target/native-agent-spike/codex/codex-rs/core" }
 codex-feedback = { path = "../../target/native-agent-spike/codex/codex-rs/feedback" }
 codex-protocol = { path = "../../target/native-agent-spike/codex/codex-rs/protocol" }
+git2 = { version = "0.20", default-features = false, features = ["https", "vendored-libgit2", "vendored-openssl"] }
+url = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }

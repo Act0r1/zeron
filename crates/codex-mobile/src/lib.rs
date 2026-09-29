@@ -1,6 +1,7 @@
 //! In-process Codex host with a small C ABI. No CLI, localhost server, or
 //! subprocess is used. Swift drains JSON-RPC events and resolves mobile tools.
 mod config;
+mod workspace_git;
 
 use codex_app_server_client::{InProcessAppServerClient, InProcessServerEvent};
 use codex_app_server_protocol::{ClientRequest, RequestId};

@@ -9,12 +9,13 @@ final class NativeWorkspaceRenderer: NSObject, WKNavigationDelegate {
     private var watchdog: Task<Void, Never>?
     private var size = CGSize.zero
     private var format = "pdf"
+    private var margin: CGFloat?
 
-    func render(html: String, width: Int, height: Int, format: String) async throws -> Data {
+    func render(html: String, width: Int, height: Int, format: String, margin: CGFloat? = nil) async throws -> Data {
         guard (1...2048).contains(width), (1...2048).contains(height), width * height <= 4_000_000,
               ["pdf", "png"].contains(format) else { throw NativeWorkspaceFiles.failure("Render needs PNG or PDF and dimensions 1–2048 (at most 4 million pixels).") }
         guard completion == nil else { throw NativeWorkspaceFiles.failure("A render is already running") }
-        self.size = CGSize(width: width, height: height); self.format = format
+        self.size = CGSize(width: width, height: height); self.format = format; self.margin = margin
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .nonPersistent()
         // The earliest CSP cannot be relaxed by a later meta tag in generated HTML.
@@ -51,6 +52,17 @@ final class NativeWorkspaceRenderer: NSObject, WKNavigationDelegate {
         webView.callAsyncJavaScript("await document.fonts.ready; await Promise.all(Array.from(document.images).map(i => i.decode())); if (window.zeronReady) await window.zeronReady; await new Promise(r => setTimeout(r, 50)); return true;", arguments: [:], in: nil, in: .page) { [weak self, weak webView] result in
             guard let self, let webView, self.completion != nil else { return }
             if case .failure(let error) = result { self.finish(.failure(error)); return }
+            if let margin = self.margin {
+                let printer = WorkspacePrintRenderer(size: self.size, margin: margin)
+                printer.addPrintFormatter(webView.viewPrintFormatter(), startingAtPageAt: 0)
+                printer.prepare(forDrawingPages: NSRange(location: 0, length: printer.numberOfPages))
+                let count = printer.numberOfPages
+                guard count > 0, count <= 100 else { self.finish(.failure(NativeWorkspaceFiles.failure("PDF must contain 1–100 pages"))); return }
+                let pdf = UIGraphicsPDFRenderer(bounds: CGRect(origin: .zero, size: self.size)).pdfData { context in
+                    for page in 0..<count { context.beginPage(); printer.drawPage(at: page, in: CGRect(origin: .zero, size: self.size)) }
+                }
+                self.finish(.success(pdf)); return
+            }
             let options = WKPDFConfiguration(); options.rect = CGRect(origin: .zero, size: self.size)
             webView.createPDF(configuration: options) { [weak self] result in
                 guard let self, self.completion != nil else { return }
@@ -74,4 +86,13 @@ final class NativeWorkspaceRenderer: NSObject, WKNavigationDelegate {
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { finish(.failure(error)) }
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { finish(.failure(error)) }
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { finish(.failure(NativeWorkspaceFiles.failure("Document renderer stopped"))) }
+}
+
+@MainActor
+private final class WorkspacePrintRenderer: UIPrintPageRenderer {
+    private let bounds: CGRect
+    private let printable: CGRect
+    init(size: CGSize, margin: CGFloat) { bounds = CGRect(origin: .zero, size: size); printable = bounds.insetBy(dx: margin, dy: margin); super.init() }
+    override var paperRect: CGRect { bounds }
+    override var printableRect: CGRect { printable }
 }

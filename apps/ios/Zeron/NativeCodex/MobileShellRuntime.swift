@@ -1,5 +1,7 @@
 import Foundation
 import WebKit
+import UIKit
+import ImageIO
 
 /// Disposable shell interpreter. NativeWorkspaceStore owns all persistent files.
 /// No device paths, credentials, or network capabilities enter the worker.
@@ -22,6 +24,9 @@ final class MobileShellRuntime: NSObject, WKNavigationDelegate {
     private let webView: WKWebView
     var generatedImagesDirectory: URL?
     private var renderer: NativeWorkspaceRenderer?
+    private var previewServer: NativeWorkspaceServer?
+    private(set) var previewEntry = "/workspace/index.html"
+    private(set) var previewURL: URL?
     let store: NativeWorkspaceStore
     private var generation: String?
     private var commandID: String?
@@ -39,6 +44,8 @@ final class MobileShellRuntime: NSObject, WKNavigationDelegate {
         webView.navigationDelegate = self
         configuration.userContentController.addScriptMessageHandler(WorkspaceBridge(owner: self), contentWorld: .page, name: "workspace")
     }
+
+    deinit { previewServer?.stop() }
 
     func execute(_ command: String) async throws -> Result {
         guard !busy else { throw Failure.message("A mobile tool is already running") }
@@ -69,6 +76,48 @@ final class MobileShellRuntime: NSObject, WKNavigationDelegate {
         return try await store.snapshot()
     }
 
+    func entries() async throws -> [NativeWorkspaceEntry] {
+        guard !busy else { throw Failure.message("A mobile tool is already running") }
+        return try await store.entries()
+    }
+    func fileData(_ path: String) async throws -> Data {
+        guard !busy else { throw Failure.message("A mobile tool is already running") }
+        return try await store.data(path)
+    }
+    func exportSelection(path: String?, to staging: URL) async throws -> URL {
+        guard !busy else { throw Failure.message("A mobile tool is already running") }
+        busy = true; defer { busy = false }
+        return try await store.exportSelection(path: path, to: staging)
+    }
+
+    func startPreview(entry: String? = nil) async throws -> URL {
+        guard !busy else { throw Failure.message("A mobile tool is already running") }
+        busy = true; defer { busy = false }
+        return try await publishPreview(entry: entry ?? previewEntry)
+    }
+    private func publishPreview(entry: String, expectedCommand: String? = nil) async throws -> URL {
+        let relative = try NativeWorkspaceFiles.relativePath(entry)
+        guard ["html", "htm"].contains((entry as NSString).pathExtension.lowercased()) else { throw Failure.message("Serve an HTML entry file") }
+        _ = try await store.data(entry)
+        let stage = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        do {
+            let root = try await store.exportSelection(path: nil, to: stage)
+            if let expectedCommand, commandID != expectedCommand { throw CancellationError() }
+            let server = try NativeWorkspaceServer(root: root)
+            let url = try await server.start(entry: relative)
+            if let expectedCommand, commandID != expectedCommand { server.stop(); throw CancellationError() }
+            previewServer?.stop(); previewServer = server; previewURL = url; previewEntry = entry
+            return url
+        } catch { try? FileManager.default.removeItem(at: stage); throw error }
+    }
+    func stopPreview() { previewServer?.stop(); previewServer = nil; previewURL = nil }
+
+    func importURLs(_ urls: [URL]) async throws -> Int {
+        guard !busy else { throw Failure.message("A mobile tool is already running") }
+        busy = true; defer { busy = false }
+        return try await store.importURLs(urls)
+    }
+
     func importEntries(_ entries: [NativeWorkspaceEntry]) async throws {
         guard !busy else { throw Failure.message("A mobile tool is already running") }
         busy = true; defer { busy = false }
@@ -92,6 +141,7 @@ final class MobileShellRuntime: NSObject, WKNavigationDelegate {
     func cancel() async {
         renderer?.cancel(); renderer = nil
         let id = commandID
+        if let id { id.withCString { zeron_git_cancel($0) } }
         commandID = nil
         generation = nil
         initialized = false
@@ -103,6 +153,52 @@ final class MobileShellRuntime: NSObject, WKNavigationDelegate {
         guard let message = body as? [String: Any], let token = message["generation"] as? String,
               token == generation, let commandID, let request = message["request"] as? [String: Any] else {
             throw Failure.message("Shell filesystem request has expired")
+        }
+        if request["method"] as? String == "serve", let args = request["args"] as? [String] {
+            guard args.count <= 1 else { throw Failure.message("Usage: serve [/workspace/index.html] or serve stop") }
+            if args.first == "stop" { stopPreview(); return ["value": "Preview stopped"] }
+            let url = try await publishPreview(entry: args.first ?? previewEntry, expectedCommand: commandID)
+            return ["value": "Serving a snapshot at \(url.absoluteString). Open Preview website in the chat menu. Relative HTML/CSS/JS/assets and JSON fetch are supported. Run serve again or tap Refresh to publish edits. Foreground only; no Node/server-side code."]
+        }
+        if request["method"] as? String == "pdf", let args = request["args"] as? [String] {
+            let usage = "Usage: pdf html /workspace/input.html /workspace/output.pdf [a4|letter] [margin_points]; or pdf images /workspace/output.pdf /workspace/image.png [...]. Image pages use A4 and 36-point margins."
+            let data: Data, output: String
+            if args.first == "html", (3...5).contains(args.count) {
+                output = args[2]
+                let paper = args.count > 3 ? args[3] : "a4"
+                guard paper == "a4" || paper == "letter", let margin = Double(args.count > 4 ? args[4] : "36"), margin.isFinite, (0...144).contains(margin) else { throw Failure.message(usage) }
+                let document = NativeWorkspaceRenderer(); renderer = document; defer { renderer = nil }
+                data = try await document.render(html: store.readFile(args[1]), width: paper == "a4" ? 595 : 612, height: paper == "a4" ? 842 : 792, format: "pdf", margin: margin)
+            } else if args.first == "images", (3...26).contains(args.count) {
+                output = args[1]
+                var images: [UIImage] = []
+                var pixels = 0
+                for path in args.dropFirst(2) {
+                    let bytes = try await store.data(path)
+                    guard let source = CGImageSourceCreateWithData(bytes as CFData, nil), let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+                          let width = properties[kCGImagePropertyPixelWidth] as? Int, let height = properties[kCGImagePropertyPixelHeight] as? Int,
+                          width > 0, height > 0, width <= 8192, height <= 8192 else { throw Failure.message("Invalid or oversized image") }
+                    pixels += width * height
+                    guard pixels <= 16_000_000, let image = UIImage(data: bytes) else { throw Failure.message("Images exceed the 16-million-pixel PDF limit") }
+                    images.append(image)
+                }
+                data = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: 595, height: 842)).pdfData { context in
+                    for image in images {
+                        context.beginPage()
+                        let scale = min(523 / image.size.width, 770 / image.size.height)
+                        let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+                        image.draw(in: CGRect(x: (595 - size.width) / 2, y: (842 - size.height) / 2, width: size.width, height: size.height))
+                    }
+                }
+            } else { throw Failure.message(usage) }
+            guard (output as NSString).pathExtension.lowercased() == "pdf" else { throw Failure.message("Output must be a /workspace/*.pdf path") }
+            try await store.saveArtifact(output, data: data, commandID: commandID)
+            let index = try await store.handle(["method": "index"], commandID: commandID)
+            return ["value": "Saved \(output) (\(data.count) bytes). Open Workspace files to preview or Save to Files.", "paths": index["value"] ?? []]
+        }
+        if request["method"] as? String == "git", let args = request["args"] as? [String] {
+            let cwd = request["cwd"] as? String ?? "/workspace"
+            return try await store.git(["-C", cwd] + args, id: commandID)
         }
         if let method = request["method"] as? String, method == "render" || method == "importImage" {
             guard let args = request["args"] as? [String] else { throw Failure.message("Invalid artifact arguments") }
@@ -203,9 +299,14 @@ final class MobileShellRuntime: NSObject, WKNavigationDelegate {
     worker.onmessage = ({data}) => {
       if (data.fsId) {
         if (stopped) return;
+        const extended = data.request?.method === 'git';
+        if (extended) for (const waiter of pending.values()) { clearTimeout(waiter.timer); waiter.timer = setTimeout(() => stop('Git exceeded its time limit'), 45000); }
+        function resumeDeadline() {
+          if (extended) for (const waiter of pending.values()) { clearTimeout(waiter.timer); waiter.timer = setTimeout(() => stop('Mobile tool exceeded its time limit'), 7000); }
+        }
         globalThis.webkit.messageHandlers.workspace.postMessage({generation, request: data.request}).then(
-          result => { if (!stopped) worker.postMessage({fsId: data.fsId, result}); },
-          error => { if (!stopped) worker.postMessage({fsId: data.fsId, error: String(error)}); }
+          result => { resumeDeadline(); if (!stopped) worker.postMessage({fsId: data.fsId, result}); },
+          error => { resumeDeadline(); if (!stopped) worker.postMessage({fsId: data.fsId, error: String(error)}); }
         );
         return;
       }

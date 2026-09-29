@@ -380,7 +380,7 @@ final class NativeCodexSession {
         let name = try NativeWorkspaceArtifacts.name(source)
         let path = "/workspace/generated/" + name
         // Preserve an already imported file, including any subsequent user edits.
-        if try await shell.snapshot().contains(where: { $0.path == path }) { return path }
+        if try await shell.entries().contains(where: { $0.path == path }) { return path }
         let data = try await Task.detached { try NativeWorkspaceArtifacts.read(source, directory: directory) }.value
         try await shell.importEntries([.init(path: path, type: "file", mode: 420, content: data.base64EncodedString())])
         return path

@@ -32,8 +32,8 @@ final class NativeWorkspacePreviewController: UIViewController, QLPreviewControl
         super.viewWillAppear(animated)
         Task {
             do {
-                guard let entry = try await shell.snapshot().first(where: { $0.path == path }), let data = Data(base64Encoded: entry.content ?? "") else { throw NativeWorkspaceFiles.failure("This file no longer exists.") }
-                render(entry, data: data)
+                guard let entry = try await shell.entries().first(where: { $0.path == path }) else { throw NativeWorkspaceFiles.failure("This file no longer exists.") }
+                render(entry, data: try await shell.fileData(path))
             } catch { workspaceError(error) }
         }
     }
@@ -76,6 +76,11 @@ final class NativeWorkspacePreviewController: UIViewController, QLPreviewControl
                 self.navigationController?.pushViewController(NativeCodexFileViewController(path: self.path, text: text, shell: self.shell), animated: true)
             })
             navigationItem.rightBarButtonItems = [navigationItem.rightBarButtonItems!.first!, edit]
+            if ["html", "htm"].contains((path as NSString).pathExtension.lowercased()) {
+                navigationItem.rightBarButtonItems?.append(UIBarButtonItem(title: "Open website", image: UIImage(systemName: "globe"), primaryAction: UIAction { [weak self] _ in
+                    guard let self else { return }; self.navigationController?.pushViewController(NativeWebsiteViewController(shell: self.shell, entry: self.path), animated: true)
+                }))
+            }
         } else {
             navigationItem.rightBarButtonItems = [navigationItem.rightBarButtonItems!.first!]
             do {
@@ -114,10 +119,9 @@ final class NativeWorkspaceExporter: NSObject, UIDocumentPickerDelegate, UIAdapt
         Task {
             defer { preparing = false }
             do {
-                let entries = try await shell.snapshot()
                 let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
                 staging = folder
-                let url = try await Task.detached { try NativeWorkspaceFiles.exportSelection(entries, path: path, to: folder) }.value
+                let url = try await shell.exportSelection(path: path, to: folder)
                 let picker = UIDocumentPickerViewController(forExporting: [url], asCopy: true)
                 picker.delegate = self
                 controller.present(picker, animated: true)

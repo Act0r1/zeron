@@ -37,6 +37,7 @@ final class NativeCodexViewController: SessionViewController, UIDocumentPickerDe
                 UIAction(title: "Copy Transcript", image: UIImage(systemName: "doc.on.doc")) { [weak self] _ in
                     UIPasteboard.general.string = self?.session.conversation.messages.compactMap(\.copiedText).joined(separator: "\n\n")
                 },
+                UIAction(title: "Preview website", image: UIImage(systemName: "globe"), attributes: disabled) { [weak self] _ in guard let self else { return }; self.navigationController?.pushViewController(NativeWebsiteViewController(shell: self.session.shell), animated: true) },
                 UIAction(title: "Workspace files", image: UIImage(systemName: "folder"), attributes: disabled) { [weak self] _ in self?.showFiles() },
                 UIAction(title: self.session.signedIn ? "Native Codex account" : "Sign in with ChatGPT", image: UIImage(systemName: "person.crop.circle"), attributes: disabled) { [weak self] _ in self?.showAccount() }
             ]
@@ -121,11 +122,10 @@ final class NativeCodexViewController: SessionViewController, UIDocumentPickerDe
         Task {
             defer { scoped.forEach { $0.stopAccessingSecurityScopedResource() }; session.endWorkspaceChange() }
             do {
-                let entries = try await Task.detached { try NativeWorkspaceFiles.collect(urls) }.value
-                try await shell.importEntries(entries)
+                let count = try await shell.importURLs(urls)
                 if urls.count == 1, (try? urls[0].resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true { session.nameWorkspace(urls[0].lastPathComponent) }
                 else { session.workspaceChanged() }
-                let alert = UIAlertController(title: "Workspace imported", message: "Copied \(entries.filter { $0.type == "file" }.count) files into this chat. The original folder is unchanged. Git metadata and dependency/build folders are excluded.", preferredStyle: .alert)
+                let alert = UIAlertController(title: "Workspace imported", message: "Copied \(count) files into this chat. The original folder is unchanged. Git metadata and dependency/build folders are excluded.", preferredStyle: .alert)
                 alert.addAction(UIAlertAction(title: "OK", style: .default)); present(alert, animated: true)
             } catch { showError(error) }
         }

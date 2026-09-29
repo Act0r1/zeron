@@ -24,7 +24,7 @@ Each conversation owns a local virtual workspace. The composer attachment menu
 imports project folders or individual files and exports the workspace to Files.
 Folder import copies the folder contents, preserving nested folders and binary
 files; it skips `.git`, `node_modules`, `.build`, and `DerivedData`. Imports reject
-symlinks, conflicting filenames, and projects exceeding 8 MB or 2,000 entries.
+symlinks, conflicting filenames, and projects exceeding 128 MB or 20,000 entries (16 MB per file).
 Failed imports leave the existing workspace intact. The original folder is never
 modified; export a copy to save your changes back to Files. The session's Workspace
 files action opens a folder browser with text editing and new-file creation.
@@ -132,14 +132,14 @@ to be exposed directly with no `exec`/`wait` wrapper, including after thread res
   results include `changedPaths`; interruption errors name retained changes.
   Interrupted scripts are never replayed. Each invocation gets a fresh interpreter
   at `/workspace`, so `cd` and environment changes do not leak between calls.
-- The workspace is capped at 8 MB and 2,000 entries. Shell execution has
+- The workspace is capped at 128 MB and 20,000 entries, with 16 MB per file. Shell execution has
   interpreter limits plus an independent worker watchdog; output is capped at
-  256 KB. Project selection across chats, patch tools, undo, and previews remain
-  follow-up work.
-- No Node, Python, git, package managers, native executables, PTYs, or shell network
-  access. Generated JavaScript runs only inside the separate document renderer,
+  256 KB. Patch tools and undo remain follow-up work. Native browsing uses metadata only;
+  imports/exports copy files without base64-encoding the whole project.
+- No Node, Python, package managers, native executables, PTYs, or general shell network
+  access. Generated JavaScript runs inside the separate document renderer or website preview,
   never in the privileged shell context. This version can inspect/edit text projects;
-  it cannot build arbitrary desktop projects or clone repositories.
+  it cannot build arbitrary desktop projects. Public HTTPS Git clone is supported.
 - just-bash's browser import of `node:zlib` is replaced with a throwing shim;
   compression commands are excluded.
 - Auth uses Codex's file credential backend in app storage protected until the
@@ -183,3 +183,50 @@ Workspace browsing supports folder search, file types/sizes, read-only text prev
   Copy Transcript includes tool names, errors, and artifact paths instead of blank
   assistant entries. These capabilities work in existing chats through the
   existing `mobile_shell` tool; no thread/schema reset is required.
+
+## Native project commands
+
+These are `mobile_shell` commands, so existing conversations retain their tool
+schema and immediately gain the capabilities on resume:
+
+```sh
+git init
+git config user.name "Your name"
+git config user.email "you@example.com"
+git add .
+git commit -m "Initial project"
+git status
+git diff --cached
+git log
+git branch experiment
+git clone https://github.com/octocat/Hello-World.git hello
+git -C /workspace/hello status
+pdf html /workspace/report.html /workspace/report.pdf a4 36
+pdf images /workspace/images.pdf /workspace/plot.png /workspace/photo.jpg
+serve /workspace/index.html
+serve stop
+```
+
+Git uses embedded libgit2, never a subprocess, shell hook or credential helper.
+Only the documented subset is available: no private authentication, fetch/push,
+checkout/switch, submodules, or arbitrary config. Clone rejects credentials in
+URLs, redirects, symlinks/submodules and excessive downloads/trees; failed clone
+removes its partial destination. `.git` is hidden from file tools, browser,
+website snapshots and exports, but preserved during native folder imports.
+Cancellation reaches libgit2 transfer callbacks. Network connect/read timeouts
+are 5/10 seconds, transfer callback deadline is 30 seconds, native Git's worker
+watchdog is 45 seconds; ordinary shell work retains its 7-second watchdog. Already
+committed changes remain after cancellation. Git output uses the normal tool row.
+
+`pdf html` prints self-contained HTML with CSS page breaks, A4/Letter paper,
+0–144-point margins (default 36), up to 100 pages. `pdf images` fits one image per
+A4 page, up to 24 images/16 million pixels combined. The earlier `render` command
+still produces a single viewport PDF or PNG. Outputs always land in `/workspace`.
+
+`serve` publishes a consistent native copy to a tokenized `127.0.0.1` HTTP URL.
+Open **Preview website** in the chat menu, or **Open website** on an HTML file.
+Relative CSS/JavaScript/images and JSON fetch work; generated pages have no
+workspace bridge, external network, or server-side runtime. Refresh republishes
+edits; Stop closes the server. iOS foreground operation only. The server accepts
+GET/HEAD, validates Host and paths, limits requests/connections, and excludes Git
+metadata. Root-absolute asset URLs should be changed to relative URLs.

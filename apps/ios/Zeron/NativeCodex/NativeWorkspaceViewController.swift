@@ -39,7 +39,7 @@ final class NativeWorkspaceViewController: UITableViewController, UISearchResult
         Task {
             defer { refreshControl?.endRefreshing() }
             do {
-                entries = try await shell.snapshot().filter { $0.path.hasPrefix(prefix) && !$0.path.dropFirst(prefix.count).contains("/") }
+                entries = try await shell.entries().filter { $0.path.hasPrefix(prefix) && !$0.path.dropFirst(prefix.count).contains("/") }
                     .sorted { lhs, rhs in
                         if lhs.type != rhs.type { return lhs.type == "directory" }
                         return lhs.path.localizedStandardCompare(rhs.path) == .orderedAscending
@@ -115,7 +115,7 @@ final class NativeWorkspaceViewController: UITableViewController, UISearchResult
 enum NativeWorkspacePresentation {
     static func type(_ entry: NativeWorkspaceEntry) -> UTType? { UTType(filenameExtension: (entry.path as NSString).pathExtension) }
     static func detail(_ entry: NativeWorkspaceEntry) -> String {
-        let bytes = Data(base64Encoded: entry.content ?? "")?.count ?? 0
+        let bytes = entry.size ?? Data(base64Encoded: entry.content ?? "")?.count ?? 0
         return "\(type(entry)?.localizedDescription ?? "File") · \(ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file))"
     }
     static func icon(_ entry: NativeWorkspaceEntry) -> String {
