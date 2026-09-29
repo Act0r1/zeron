@@ -1,4 +1,4 @@
-import { Bash, InMemoryFs, MountableFs } from "just-bash/browser";
+import { Bash, InMemoryFs, MountableFs, defineCommand } from "just-bash/browser";
 import { NativeWorkspaceFs } from "./native-fs.mjs";
 
 // Deliberately small, foreground-only feasibility environment. No host file
@@ -46,7 +46,15 @@ export async function createRuntime(snapshot = [], nativeRequest) {
           if (typeof command !== "string" || command.length > 64 * 1024) throw new Error("Invalid command");
           if (native) await native.refresh();
           // A fresh interpreter prevents cwd/environment state leaking across tool calls.
-          const interpreter = new Bash({ fs, cwd: "/workspace", commands, executionLimits: limits });
+          const customCommands = native ? [
+            ...[["render", "render"], ["import_image", "importImage"]].map(([name, method]) => defineCommand(name, async (args) => {
+              try {
+                const output = await native.call(method, "/", { args });
+                return { stdout: output + "\n", stderr: "", exitCode: 0 };
+              } catch (error) { return { stdout: "", stderr: String(error) + "\n", exitCode: 1 }; }
+            })),
+          ] : [];
+          const interpreter = new Bash({ fs, cwd: "/workspace", commands, customCommands, executionLimits: limits });
           const { stdout, stderr, exitCode } = await interpreter.exec(command, { cwd: "/workspace" });
           return { stdout, stderr, exitCode };
         }

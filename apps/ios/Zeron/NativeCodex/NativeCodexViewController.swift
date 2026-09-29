@@ -35,7 +35,7 @@ final class NativeCodexViewController: SessionViewController, UIDocumentPickerDe
             let disabled: UIMenuElement.Attributes = self.session.running || self.session.workspaceBusy || self.session.conversation.id != self.nativeSource.conversationId ? .disabled : []
             var actions: [UIMenuElement] = [
                 UIAction(title: "Copy Transcript", image: UIImage(systemName: "doc.on.doc")) { [weak self] _ in
-                    UIPasteboard.general.string = self?.session.conversation.messages.map { ($0.user ? "You: " : "Codex: ") + $0.text }.joined(separator: "\n\n")
+                    UIPasteboard.general.string = self?.session.conversation.messages.compactMap(\.copiedText).joined(separator: "\n\n")
                 },
                 UIAction(title: "Workspace files", image: UIImage(systemName: "folder"), attributes: disabled) { [weak self] _ in self?.showFiles() },
                 UIAction(title: self.session.signedIn ? "Native Codex account" : "Sign in with ChatGPT", image: UIImage(systemName: "person.crop.circle"), attributes: disabled) { [weak self] _ in self?.showAccount() }

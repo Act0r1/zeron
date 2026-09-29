@@ -20,6 +20,8 @@ final class MobileShellRuntime: NSObject, WKNavigationDelegate {
     }
 
     private let webView: WKWebView
+    var generatedImagesDirectory: URL?
+    private var renderer: NativeWorkspaceRenderer?
     let store: NativeWorkspaceStore
     private var generation: String?
     private var commandID: String?
@@ -88,6 +90,7 @@ final class MobileShellRuntime: NSObject, WKNavigationDelegate {
     /// Stop JS, reject further callbacks, and drain any already accepted native write.
     /// Acknowledged mutations survive cancellation; interrupted scripts are never replayed.
     func cancel() async {
+        renderer?.cancel(); renderer = nil
         let id = commandID
         commandID = nil
         generation = nil
@@ -100,6 +103,28 @@ final class MobileShellRuntime: NSObject, WKNavigationDelegate {
         guard let message = body as? [String: Any], let token = message["generation"] as? String,
               token == generation, let commandID, let request = message["request"] as? [String: Any] else {
             throw Failure.message("Shell filesystem request has expired")
+        }
+        if let method = request["method"] as? String, method == "render" || method == "importImage" {
+            guard let args = request["args"] as? [String] else { throw Failure.message("Invalid artifact arguments") }
+            let path: String
+            let data: Data
+            if method == "importImage" {
+                guard (1...2).contains(args.count), let directory = generatedImagesDirectory else { throw Failure.message("Usage: import_image GENERATED_FILENAME.png [/workspace/output.png]") }
+                let name = try NativeWorkspaceArtifacts.name(args[0])
+                path = args.count == 2 ? args[1] : "/workspace/generated/" + name
+                data = try await Task.detached { try NativeWorkspaceArtifacts.read(args[0], directory: directory) }.value
+            } else {
+                guard args.count == 4, let width = Int(args[2]), let height = Int(args[3]) else { throw Failure.message("Usage: render /workspace/input.html /workspace/output.pdf|png WIDTH HEIGHT. Self-contained HTML, inline JS/canvas/SVG and data images only. Optional window.zeronReady Promise.") }
+                path = args[1]
+                _ = try NativeWorkspaceFiles.relativePath(path)
+                let html = try await store.readFile(args[0])
+                let document = NativeWorkspaceRenderer(); renderer = document
+                defer { renderer = nil }
+                data = try await document.render(html: html, width: width, height: height, format: (path as NSString).pathExtension.lowercased())
+            }
+            try await store.saveArtifact(path, data: data, commandID: commandID)
+            let index = try await store.handle(["method": "index"], commandID: commandID)
+            return ["value": "Saved \(path) (\(data.count) bytes). Open Workspace files to preview or Save to Files.", "paths": index["value"] ?? []]
         }
         return try await store.handle(request, commandID: commandID)
     }

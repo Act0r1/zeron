@@ -151,7 +151,7 @@ final class NativeCodexSession {
                 }
                 status = signedIn ? "Local workspace · OpenAI model" : "Sign in to ChatGPT to start"
                 loadingProgress = 0.95; changed()
-                if let id = conversation.threadId { _ = try await codex.request("thread/resume", ["threadId": id]) }
+                if let id = conversation.threadId { _ = try await codex.request("thread/resume", ["threadId": id]); await recoverImages() }
                 changed()
             } catch { fail(error) }
         }
@@ -226,7 +226,7 @@ final class NativeCodexSession {
             switching = true
             Task {
                 defer { switching = false; changed(); deliverInitialPrompt() }
-                do { _ = try await codex.request("thread/resume", ["threadId": id]); status = signedIn ? "On this iPhone · files saved" : "Sign in to ChatGPT to start" }
+                do { _ = try await codex.request("thread/resume", ["threadId": id]); status = signedIn ? "On this iPhone · files saved" : "Sign in to ChatGPT to start"; await recoverImages() }
                 catch { fail(error) }
             }
         } else { deliverInitialPrompt() }
@@ -294,7 +294,12 @@ final class NativeCodexSession {
         }
         if method == "mobile/error" { ready = false; running = false; status = params["message"] as? String ?? "Codex stopped"; changed(); return }
         if let thread = params["threadId"] as? String, thread != conversation.threadId { return }
+        if let id = conversation.threadId { shell.generatedImagesDirectory = root.appendingPathComponent("engine/generated_images/" + id) }
         switch method {
+        case "item/started", "item/completed":
+            if let item = params["item"] as? [String: Any], item["type"] as? String == "imageGeneration" {
+                receiveImage(item, completed: method == "item/completed")
+            }
         case "turn/started": turnId = (params["turn"] as? [String: Any])?["id"] as? String
         case "item/agentMessage/delta":
             let id = params["itemId"] as? String ?? "assistant"
@@ -327,16 +332,76 @@ final class NativeCodexSession {
                 try? codex.respond(id: id, result: result)
             }
         case "turn/completed":
-            running = stopping; turnId = nil
-            let turn = params["turn"] as? [String: Any] ?? [:]
-            if let error = turn["error"] as? [String: Any] { status = error["message"] as? String ?? "Turn failed" }
-            else { status = turn["status"] as? String == "interrupted" ? "Interrupted" : "On this iPhone · files saved" }
-            finishPendingTools()
-            save(); changed()
+            let pending = tools, stamp = generation
+            Task {
+                await pending?.value
+                guard stamp == generation else { return }
+                running = stopping; turnId = nil
+                let turn = params["turn"] as? [String: Any] ?? [:]
+                if let error = turn["error"] as? [String: Any] { status = error["message"] as? String ?? "Turn failed" }
+                else { status = turn["status"] as? String == "interrupted" ? "Interrupted" : "On this iPhone · files saved" }
+                finishPendingTools()
+                save(); changed()
+            }
         case "error": status = (params["error"] as? [String: Any])?["message"] as? String ?? "Codex error"; changed()
         default:
             if let id = event["id"] { try? codex.reject(id: id, message: "This request is not available in the mobile workspace") }
         }
+    }
+
+    private func receiveImage(_ item: [String: Any], completed: Bool) {
+        guard let id = item["id"] as? String else { return }
+        if !conversation.messages.contains(where: { $0.id == id }) {
+            conversation.messages.append(.init(id: id, user: false, text: "", tool: .init(name: "imagegen", argument: item["revisedPrompt"] as? String ?? "Generate image")))
+        }
+        save(); changed()
+        guard completed else { return }
+        let previous = tools, stamp = generation, shell = shell
+        tools = Task {
+            await previous?.value
+            guard stamp == generation else { return }
+            let output: String
+            var failed = false
+            do {
+                guard item["status"] as? String == "completed" else { throw NativeWorkspaceFiles.failure("Image generation did not complete") }
+                let path = try await importGeneratedImage(source: item["savedPath"] as? String ?? id + ".png", shell: shell)
+                output = "Saved \(path). Open Workspace files to preview or Save to Files."
+            } catch { output = "Image could not be saved to the workspace: " + error.localizedDescription; failed = true }
+            guard stamp == generation, let index = conversation.messages.firstIndex(where: { $0.id == id }) else { return }
+            conversation.messages[index].tool?.output = output
+            conversation.messages[index].tool?.isError = failed
+            conversation.messages[index].tool?.resolved = true
+            save(); changed()
+        }
+    }
+
+    private func importGeneratedImage(source: String, shell: MobileShellRuntime) async throws -> String {
+        guard let directory = shell.generatedImagesDirectory else { throw NativeWorkspaceFiles.failure("No conversation image directory") }
+        let name = try NativeWorkspaceArtifacts.name(source)
+        let path = "/workspace/generated/" + name
+        // Preserve an already imported file, including any subsequent user edits.
+        if try await shell.snapshot().contains(where: { $0.path == path }) { return path }
+        let data = try await Task.detached { try NativeWorkspaceArtifacts.read(source, directory: directory) }.value
+        try await shell.importEntries([.init(path: path, type: "file", mode: 420, content: data.base64EncodedString())])
+        return path
+    }
+
+    /// Recover images from older app versions that dropped image-result events.
+    private func recoverImages() async {
+        guard let id = conversation.threadId else { return }
+        let directory = root.appendingPathComponent("engine/generated_images/" + id)
+        shell.generatedImagesDirectory = directory
+        guard let files = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else { return }
+        for file in files.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) where file.pathExtension == "png" {
+            let itemID = file.deletingPathExtension().lastPathComponent
+            do {
+                let path = try await importGeneratedImage(source: file.lastPathComponent, shell: shell)
+                if !conversation.messages.contains(where: { $0.id == itemID }) {
+                    conversation.messages.append(.init(id: itemID, user: false, text: "", tool: .init(name: "imagegen", argument: "Recovered generated image", output: "Saved \(path). Open Workspace files to preview or Save to Files.", resolved: true)))
+                }
+            } catch { status = "Could not recover generated image: " + error.localizedDescription; break }
+        }
+        save(); changed()
     }
 
     private func finishPendingTools() {

@@ -136,8 +136,9 @@ to be exposed directly with no `exec`/`wait` wrapper, including after thread res
   interpreter limits plus an independent worker watchdog; output is capped at
   256 KB. Project selection across chats, patch tools, undo, and previews remain
   follow-up work.
-- No Node, Python, git, package managers, native executables, PTYs, shell network
-  access, or arbitrary JS execution. This version can inspect/edit text projects;
+- No Node, Python, git, package managers, native executables, PTYs, or shell network
+  access. Generated JavaScript runs only inside the separate document renderer,
+  never in the privileged shell context. This version can inspect/edit text projects;
   it cannot build arbitrary desktop projects or clone repositories.
 - just-bash's browser import of `node:zlib` is replaced with a throwing shim;
   compression commands are excluded.
@@ -163,3 +164,22 @@ to be exposed directly with no `exec`/`wait` wrapper, including after thread res
   release distribution and background execution are not validated by them.
 
 Workspace browsing supports folder search, file types/sizes, read-only text previews with explicit editing, and Quick Look for supported binary documents. The download button or an item’s context menu opens the system Save to Files picker for a file, folder, or the whole workspace. Exports use fresh snapshots and disposable copies; selected folders exclude their siblings. Tests cover binary selection export and the browser → preview → Files save flow.
+
+### Generated artifacts
+
+- `render /workspace/input.html /workspace/output.pdf 800 600` (or `.png`)
+  renders a single viewport from self-contained HTML, inline canvas/SVG/JavaScript,
+  and embedded data images. Scripts can set `window.zeronReady` to a Promise.
+  It uses a disposable WebView without filesystem handlers or network access,
+  a 4-second deadline, and a maximum of 4 million pixels (each side 1–2048).
+  PNGs are rasterized from the same PDF output. Native persistence finishes before
+  the shell reports success; cancellation prevents late writes.
+- `import_image GENERATED_FILENAME.png /workspace/output.png` imports only the
+  active conversation’s generated images. Old absolute container paths are
+  rebased by filename, and symlinks/non-images are rejected. Image-result events
+  also save copies under `/workspace/generated/`; reopening an older chat recovers
+  images whose events were ignored by previous app versions, subject to quota.
+- The pinned iOS image-tool hint no longer claims output is displayed inline.
+  Copy Transcript includes tool names, errors, and artifact paths instead of blank
+  assistant entries. These capabilities work in existing chats through the
+  existing `mobile_shell` tool; no thread/schema reset is required.

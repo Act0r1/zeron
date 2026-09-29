@@ -28,4 +28,11 @@ final class NativeCodexTranscriptTests: XCTestCase {
         XCTAssertEqual(pending.transcriptEntry(streaming: true, working: true).tool?.resolved, false)
         XCTAssertEqual(pending.transcriptEntry(streaming: false, working: false).tool?.isError, true)
     }
+    func testCopyTranscriptIncludesToolFailuresAndSkipsEmptyAssistantEntries() {
+        let tool = NativeCodexMessage(id: "call", user: false, text: "", tool: .init(name: "mobile_shell", argument: "awk -f graph.awk", output: #"{"stdout":"","stderr":"awk: invalid option -- f","exitCode":1}"#, resolved: true, isError: true))
+        XCTAssertTrue(tool.copiedText?.contains("awk: invalid option -- f") == true)
+        XCTAssertTrue(tool.copiedText?.contains("Failed") == true)
+        XCTAssertNil(NativeCodexMessage(id: "empty", user: false, text: "").copiedText)
+    }
+
 }

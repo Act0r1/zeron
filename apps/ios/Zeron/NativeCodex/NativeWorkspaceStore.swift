@@ -131,6 +131,13 @@ actor NativeWorkspaceStore {
         _ = try handle(["method": "writeFile", "path": relative, "content": Data(content.utf8).base64EncodedString()])
     }
 
+    func saveArtifact(_ path: String, data: Data, commandID: String? = nil) throws {
+        let relative = "/" + (try NativeWorkspaceFiles.relativePath(path))
+        let parent = (relative as NSString).deletingLastPathComponent
+        if parent != "/" { _ = try handle(["method": "mkdir", "path": parent, "recursive": true], commandID: commandID) }
+        _ = try handle(["method": "writeFile", "path": relative, "content": data.base64EncodedString()], commandID: commandID)
+    }
+
     /// The bridge accepts only filesystem operations, never device paths or code.
     func handle(_ request: [String: Any], commandID expected: String? = nil) throws -> [String: Any] {
         if let expected, expected != commandID { throw failure("Shell command was cancelled") }

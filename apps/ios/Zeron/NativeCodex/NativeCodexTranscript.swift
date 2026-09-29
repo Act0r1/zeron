@@ -37,6 +37,15 @@ struct NativeCodexTool: Codable {
 }
 
 extension NativeCodexMessage {
+    var copiedText: String? {
+        if let activity = tool ?? NativeCodexTool.legacy(text) {
+            let state = activity.resolved ? (activity.isError ? "Failed" : "Completed") : "In progress"
+            return "Codex tool: \(activity.name)\n\(activity.argument)\n\(state)" + (activity.displayOutput.map { "\n" + $0 } ?? "")
+        }
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return (user ? "You: " : "Codex: ") + text
+    }
+
     func transcriptEntry(streaming: Bool, working: Bool) -> LocalTranscriptEntry {
         let activity = user ? nil : tool ?? NativeCodexTool.legacy(text)
         let projected = activity.map { value in
