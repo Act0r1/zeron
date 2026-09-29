@@ -15,7 +15,14 @@ pub(super) fn remember(history: &mut Vec<PathBuf>, source: &Path) {
 fn choose(
     folder: &Path,
     history: &[PathBuf],
-) -> Result<(PathBuf, crate::attachments::StagedAttachment), String> {
+) -> Result<
+    (
+        PathBuf,
+        crate::attachments::StagedAttachment,
+        image::DynamicImage,
+    ),
+    String,
+> {
     let entries = std::fs::read_dir(folder).map_err(|_| {
         "Unable to read the wallpaper folder. Choose an accessible folder in Appearance."
             .to_string()
@@ -51,9 +58,9 @@ fn choose(
     });
     for (_, path) in candidates {
         if let Ok(staged) = crate::attachments::stage_file(&path)
-            && crate::new_thread_background_image::decode(staged.bytes()).is_ok()
+            && let Ok(image) = crate::new_thread_background_image::decode(staged.bytes())
         {
-            return Ok((path, staged));
+            return Ok((path, staged, image));
         }
     }
     Err("No readable wallpapers found in this folder. Add images such as PNG or JPEG, or choose another folder.".into())
@@ -107,12 +114,11 @@ impl Candidate {
             .folder
             .as_deref()
             .ok_or_else(|| "Choose a wallpaper folder in Appearance first.".to_string())?;
-        let (source, staged) = choose(folder, history)?;
+        let (source, staged, image) = choose(folder, history)?;
         let artwork = crate::new_thread_background_effects::PreloadedArtwork::load(
-            staged.bytes(),
-            key.effect,
-            key.light,
-        )?;
+            &image, key.effect, key.light,
+        );
+        drop(image);
         let color = artwork.color();
         let file = super::prepare_background_file(staged, &key.data_dir)?;
         Ok(Self {
@@ -134,9 +140,38 @@ struct PreloadQueue {
 }
 impl Global for PreloadQueue {}
 
+/// Preloaded copies still queued when the app exits never run their `Drop`
+/// cleanup. Before this process prepares any of its own, retire managed files
+/// other than the active background so earlier sessions' copies don't pile up.
+fn remove_orphaned_preloads(key: &QueueKey) {
+    if key.data_dir.as_os_str().is_empty() {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(key.data_dir.join(super::NEW_THREAD_BACKGROUND_DIR)) else {
+        return;
+    };
+    // Compare names, not full paths, so a differently spelled data directory
+    // can never make the active image look orphaned.
+    let active = key.background.as_ref().and_then(|background| {
+        Path::new(&background.path)
+            .file_name()
+            .map(|name| name.to_owned())
+    });
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let managed = name
+            .to_str()
+            .is_some_and(|name| name.starts_with("new-thread-background-"));
+        if managed && active.as_deref() != Some(name.as_os_str()) {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
 fn synchronize(cx: &mut App) {
     let key = QueueKey::current(cx);
     if cx.try_global::<PreloadQueue>().is_none() {
+        remove_orphaned_preloads(&key);
         cx.set_global(PreloadQueue::default());
     }
     let queue = cx.global_mut::<PreloadQueue>();
@@ -321,6 +356,39 @@ mod tests {
             }
         });
         cx.run_until_parked();
+    }
+
+    #[gpui::test]
+    fn first_preload_retires_copies_left_by_a_previous_session(cx: &mut gpui::TestAppContext) {
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path().join("data");
+        let backgrounds = data.join(super::super::NEW_THREAD_BACKGROUND_DIR);
+        std::fs::create_dir_all(&backgrounds).unwrap();
+        let active = backgrounds.join("new-thread-background-active.png");
+        let orphan = backgrounds.join("new-thread-background-orphan.png");
+        let unrelated = backgrounds.join("keep.txt");
+        for path in [&active, &orphan, &unrelated] {
+            std::fs::write(path, b"x").unwrap();
+        }
+        cx.update(|cx| {
+            super::super::init(
+                super::super::UiSettings {
+                    new_thread_composer_background: Some(
+                        super::super::NewThreadComposerBackground {
+                            path: active.to_string_lossy().into_owned(),
+                            name: "active.png".into(),
+                        },
+                    ),
+                    ..Default::default()
+                },
+                &data,
+                cx,
+            );
+            preload(cx);
+        });
+        assert!(active.is_file());
+        assert!(unrelated.is_file());
+        assert!(!orphan.exists());
     }
 
     #[gpui::test]

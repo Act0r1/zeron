@@ -280,30 +280,35 @@ type Cache = Vec<(PathBuf, Source)>;
 static CACHE: OnceLock<Mutex<Cache>> = OnceLock::new();
 
 fn decode_source(bytes: &[u8]) -> Option<Arc<BackgroundLuminance>> {
-    let proxy = crate::new_thread_background_image::decode(bytes)
-        .ok()?
-        .thumbnail(2048, 2048);
+    Some(source_from_image(
+        &crate::new_thread_background_image::decode(bytes).ok()?,
+    ))
+}
+
+fn source_from_image(image: &image::DynamicImage) -> Arc<BackgroundLuminance> {
+    let proxy = image.thumbnail(2048, 2048);
     let gray = proxy.to_luma8();
-    Some(Arc::new(BackgroundLuminance {
+    Arc::new(BackgroundLuminance {
         width: gray.width(),
         height: gray.height(),
         pixels: gray.into_raw().into_boxed_slice(),
         colors: proxy.to_rgba8().pixels().map(|pixel| pixel.0).collect(),
         effects: Mutex::new(Vec::new()),
-    }))
+    })
 }
 
 /// Fully decoded source and selected effect, built on the background executor.
 pub(crate) struct PreloadedArtwork(Arc<BackgroundLuminance>);
 
 impl PreloadedArtwork {
+    /// Takes the image the caller already decoded to validate the candidate,
+    /// so a full-resolution wallpaper is decoded once per preload.
     pub fn load(
-        bytes: &[u8],
+        image: &image::DynamicImage,
         effect: NewThreadBackgroundEffect,
         light: bool,
-    ) -> Result<Self, String> {
-        let source =
-            decode_source(bytes).ok_or_else(|| "Unable to decode wallpaper.".to_string())?;
+    ) -> Self {
+        let source = source_from_image(image);
         let light = light
             && !matches!(
                 effect,
@@ -315,7 +320,7 @@ impl PreloadedArtwork {
             .lock()
             .unwrap()
             .push(((effect, light), Some(image)));
-        Ok(Self(source))
+        Self(source)
     }
 
     pub fn color(&self) -> Option<zeron_theme::Color> {

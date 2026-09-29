@@ -2716,7 +2716,7 @@ impl Render for AppearancePage {
                             vec![
                                 div()
                                     .child(SharedString::from(if crate::settings::current(cx).wallpaper_theme_colors {
-                                        "Wallpaper colours are enabled; this accent is used when disabled.".to_string()
+                                        "Wallpaper colors are enabled; this accent is used when they are off.".to_string()
                                     } else { accent_helper(current_accent) }))
                                     .into_any_element(),
                             ],
@@ -2737,15 +2737,15 @@ impl Render for AppearancePage {
         settings_rows.push(
             widgets::card_row(&theme, false)
                 .child(div().flex_1().min_w_0()
-                    .child(widgets::row_title(&theme, "Match wallpaper colours"))
+                    .child(widgets::row_title(&theme, "Match wallpaper colors"))
                     .child(widgets::meta_line(&theme, vec![div()
-                        .child("Use wallpaper colours for accents, highlights and subtle surface tints.")
+                        .child("Use wallpaper colors for accents, highlights, and subtle surface tints.")
                         .into_any_element()])))
                 .child(widgets::toggle_switch(&theme, match_wallpaper, "wallpaper-theme-colors")
                     .id("wallpaper-theme-colors-toggle")
                     .tab_index(0)
                     .role(gpui::Role::Switch)
-                    .aria_label("Match wallpaper colours")
+                    .aria_label("Match wallpaper colors")
                     .focus_visible(|s| s.border_2().border_color(theme.accent))
                     .cursor_pointer()
                     .aria_toggled(if match_wallpaper { gpui::Toggled::True } else { gpui::Toggled::False })
