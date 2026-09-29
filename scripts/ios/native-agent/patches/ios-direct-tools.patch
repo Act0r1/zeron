@@ -1,0 +1,17 @@
+diff --git a/codex-rs/core/src/tools/mod.rs b/codex-rs/core/src/tools/mod.rs
+index 41ed018..3b512ed 100644
+--- a/codex-rs/core/src/tools/mod.rs
++++ b/codex-rs/core/src/tools/mod.rs
+@@ -73,6 +73,12 @@ pub(crate) fn tool_user_shell_type(
+ }
+ 
+ pub(crate) fn requested_tool_mode(turn_context: &TurnContext, model_info: &ModelInfo) -> ToolMode {
++    // Zeron's iOS host has no subprocess code-mode runtime. Model catalog hints
++    // must not hide its native dynamic tools behind a disabled executor.
++    #[cfg(target_os = "ios")]
++    if !turn_context.config.features.enabled(Feature::CodeModeHost) {
++        return ToolMode::Direct;
++    }
+     model_info.tool_mode.unwrap_or_else(|| {
+         if turn_context.config.features.enabled(Feature::CodeModeOnly) {
+             ToolMode::CodeModeOnly

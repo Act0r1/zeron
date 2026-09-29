@@ -1,0 +1,223 @@
+import Foundation
+import WebKit
+
+/// Disposable shell interpreter. NativeWorkspaceStore owns all persistent files.
+/// No device paths, credentials, or network capabilities enter the worker.
+@MainActor
+final class MobileShellRuntime: NSObject, WKNavigationDelegate {
+    struct Result: Decodable {
+        let stdout: String
+        let stderr: String
+        let exitCode: Int
+        var changedPaths: [String] = []
+
+        private enum CodingKeys: String, CodingKey { case stdout, stderr, exitCode }
+    }
+
+    enum Failure: LocalizedError {
+        case message(String)
+        var errorDescription: String? { if case .message(let text) = self { return text }; return nil }
+    }
+
+    private let webView: WKWebView
+    let store: NativeWorkspaceStore
+    private var generation: String?
+    private var commandID: String?
+    private var navigation: CheckedContinuation<Void, Error>?
+    private var loaded = false
+    private var initialized = false
+    private var busy = false
+
+    init(checkpointURL: URL) {
+        store = NativeWorkspaceStore(checkpointURL: checkpointURL)
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
+        webView = WKWebView(frame: .zero, configuration: configuration)
+        super.init()
+        webView.navigationDelegate = self
+        configuration.userContentController.addScriptMessageHandler(WorkspaceBridge(owner: self), contentWorld: .page, name: "workspace")
+    }
+
+    func execute(_ command: String) async throws -> Result {
+        guard !busy else { throw Failure.message("A mobile tool is already running") }
+        busy = true
+        let id = UUID().uuidString
+        commandID = id
+        defer { busy = false; commandID = nil }
+        try await store.beginCommand(id)
+        do {
+            try await prepare(commandID: id)
+            guard commandID == id else { throw Failure.message("Cancelled") }
+            let response = try await request(["method": "exec", "command": command])
+            var value = try JSONDecoder().decode(Result.self, from: response)
+            value.changedPaths = await store.changedPaths()
+            await store.endCommand(id)
+            return value
+        } catch {
+            await cancel()
+            let paths = await store.changedPaths()
+            let suffix = paths.isEmpty ? "" : " Saved changes remain in: " + paths.joined(separator: ", ")
+            throw Failure.message(error.localizedDescription + suffix)
+        }
+    }
+
+    func snapshot() async throws -> [NativeWorkspaceEntry] {
+        guard !busy else { throw Failure.message("A mobile tool is already running") }
+        busy = true; defer { busy = false }
+        return try await store.snapshot()
+    }
+
+    func importEntries(_ entries: [NativeWorkspaceEntry]) async throws {
+        guard !busy else { throw Failure.message("A mobile tool is already running") }
+        busy = true; defer { busy = false }
+        try await store.importEntries(entries)
+    }
+
+    func readFile(_ path: String) async throws -> String {
+        guard !busy else { throw Failure.message("A mobile tool is already running") }
+        busy = true; defer { busy = false }
+        return try await store.readFile(path)
+    }
+
+    func writeFile(_ path: String, content: String) async throws {
+        guard !busy else { throw Failure.message("A mobile tool is already running") }
+        busy = true; defer { busy = false }
+        try await store.writeFile(path, content: content)
+    }
+
+    /// Stop JS, reject further callbacks, and drain any already accepted native write.
+    /// Acknowledged mutations survive cancellation; interrupted scripts are never replayed.
+    func cancel() async {
+        let id = commandID
+        commandID = nil
+        generation = nil
+        initialized = false
+        if let id { await store.endCommand(id) }
+        if loaded { _ = try? await webView.evaluateJavaScript("globalThis.mobileShell?.stop('Cancelled')") }
+    }
+
+    fileprivate func filesystem(_ body: Any) async throws -> [String: Any] {
+        guard let message = body as? [String: Any], let token = message["generation"] as? String,
+              token == generation, let commandID, let request = message["request"] as? [String: Any] else {
+            throw Failure.message("Shell filesystem request has expired")
+        }
+        return try await store.handle(request, commandID: commandID)
+    }
+
+    private func prepare(commandID id: String) async throws {
+        guard commandID == id else { throw Failure.message("Cancelled") }
+        guard !initialized else { return }
+        guard let workerURL = Bundle.main.url(forResource: "NativeShellWorker", withExtension: "js") else {
+            throw Failure.message("Build the mobile shell resource: cd scripts/ios/native-agent && npm ci && npm run build")
+        }
+        let source = try String(contentsOf: workerURL, encoding: .utf8)
+        if !loaded {
+            try await withCheckedThrowingContinuation { continuation in
+                navigation = continuation
+                webView.loadHTMLString("<html><head><meta http-equiv='Content-Security-Policy' content=\"default-src 'none'; script-src 'unsafe-eval'; worker-src blob:; connect-src 'none'\"></head><body></body></html>", baseURL: nil)
+            }
+            loaded = true
+        }
+        guard commandID == id else { throw Failure.message("Cancelled") }
+        let token = UUID().uuidString
+        generation = token
+        _ = try await webView.callAsyncJavaScript(Self.bootstrap, arguments: ["source": source, "generation": token], in: nil, contentWorld: .page)
+        _ = try await request(["method": "initialize"])
+        guard commandID == id else { throw Failure.message("Cancelled") }
+        initialized = true
+    }
+
+    private func request(_ message: [String: Any]) async throws -> Data {
+        let value = try await webView.callAsyncJavaScript(
+            "return JSON.stringify(await globalThis.mobileShell.request(message));",
+            arguments: ["message": message], in: nil, contentWorld: .page
+        )
+        guard let json = value as? String, let data = json.data(using: .utf8) else {
+            throw Failure.message("Invalid mobile tool response")
+        }
+        return data
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        self.navigation?.resume(); self.navigation = nil
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        self.navigation?.resume(throwing: error); self.navigation = nil
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        self.navigation?.resume(throwing: error); self.navigation = nil
+    }
+
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        loaded = false
+        generation = nil
+        initialized = false
+        navigation?.resume(throwing: Failure.message("Mobile tool web process terminated"))
+        navigation = nil
+    }
+
+    private static let bootstrap = """
+    globalThis.mobileShell?.stop('Restarted');
+    const url = URL.createObjectURL(new Blob([source], {type: 'text/javascript'}));
+    const worker = new Worker(url);
+    URL.revokeObjectURL(url);
+    const pending = new Map();
+    let sequence = 0;
+    let stopped = false;
+    function stop(reason) {
+      stopped = true;
+      worker.terminate();
+      for (const {reject, timer} of pending.values()) {
+        clearTimeout(timer);
+        reject(new Error(reason));
+      }
+      pending.clear();
+    }
+    worker.onmessage = ({data}) => {
+      if (data.fsId) {
+        if (stopped) return;
+        globalThis.webkit.messageHandlers.workspace.postMessage({generation, request: data.request}).then(
+          result => { if (!stopped) worker.postMessage({fsId: data.fsId, result}); },
+          error => { if (!stopped) worker.postMessage({fsId: data.fsId, error: String(error)}); }
+        );
+        return;
+      }
+      const waiter = pending.get(data.id);
+      if (!waiter) return;
+      clearTimeout(waiter.timer);
+      pending.delete(data.id);
+      if (data.error) waiter.reject(new Error(data.error));
+      else waiter.resolve(data.result);
+    };
+    worker.onerror = event => stop(event.message || 'Worker failed');
+    globalThis.mobileShell = {
+      stop,
+      request(message) {
+        return new Promise((resolve, reject) => {
+          if (stopped) { reject(new Error('Worker stopped')); return; }
+          const id = ++sequence;
+          const timer = setTimeout(() => stop('Mobile tool exceeded its time limit'), 7000);
+          pending.set(id, {resolve, reject, timer});
+          worker.postMessage({...message, id});
+        });
+      }
+    };
+    return true;
+    """
+}
+
+@MainActor
+private final class WorkspaceBridge: NSObject, WKScriptMessageHandlerWithReply {
+    weak var owner: MobileShellRuntime?
+    init(owner: MobileShellRuntime) { self.owner = owner }
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage, replyHandler: @escaping (Any?, String?) -> Void) {
+        Task {
+            do {
+                guard let owner else { throw MobileShellRuntime.Failure.message("Shell was closed") }
+                replyHandler(try await owner.filesystem(message.body), nil)
+            } catch { replyHandler(nil, error.localizedDescription) }
+        }
+    }
+}
