@@ -371,6 +371,10 @@ pub struct TerminalPanel {
     /// than a permanently painted rail beside the panel: the terminal owns
     /// the cursor.
     bar: MenuScrollbarState,
+    /// Fixture builds record link activations instead of launching the OS
+    /// opener, so a run never opens the developer's browser.
+    #[cfg(feature = "browser-fixture")]
+    fixture_opened_links: Vec<String>,
     _observe: Subscription,
 }
 
@@ -395,6 +399,8 @@ impl TerminalPanel {
             selection_scroll_task: None,
             rail_tab_key: None,
             bar: MenuScrollbarState::default(),
+            #[cfg(feature = "browser-fixture")]
+            fixture_opened_links: Vec::new(),
             _observe: observe,
         }
     }
@@ -1157,6 +1163,9 @@ impl TerminalPanel {
             && event.click_count == 1
             && let Some(link) = self.link_at_position(event.position, cx)
         {
+            #[cfg(feature = "browser-fixture")]
+            self.fixture_opened_links.push(link.uri);
+            #[cfg(not(feature = "browser-fixture"))]
             cx.open_url(&link.uri);
             return;
         }
@@ -1896,6 +1905,48 @@ impl Render for TerminalPanel {
                     .children(scrollbar),
             )
             .into_any_element()
+    }
+}
+
+/// Native fixture hooks for terminal link coverage; absent in shipped builds.
+#[cfg(feature = "browser-fixture")]
+impl TerminalPanel {
+    /// Add a PTY-less tab to the selected chat with `output` already fed.
+    pub fn fixture_seed_tab(&mut self, title: &str, output: &[u8], cx: &mut Context<Self>) {
+        let chat = self.selected_chat(cx);
+        let key = self.reserve_tab_for_chat(chat.clone(), title.to_string(), cx);
+        if let Some(tab) = self.tab_mut(&chat, key) {
+            tab.emulator.feed(output);
+        }
+        cx.notify();
+    }
+
+    /// Window position of a viewport cell's centre, from the last prepaint.
+    pub fn fixture_cell_position(&self, row: usize, col: usize) -> Option<gpui::Point<Pixels>> {
+        let geometry = self.geometry?;
+        Some(gpui::point(
+            geometry.origin.x + px(geometry.cell_w * (col as f32 + 0.5)),
+            geometry.origin.y + px(geometry.line_h * (row as f32 + 0.5)),
+        ))
+    }
+
+    /// Viewport row text of the active tab, for locating fixture output.
+    pub fn fixture_row_text(&self, row: usize, cx: &App) -> Option<String> {
+        self.active_tab(cx).map(|tab| tab.emulator.row_text(row))
+    }
+
+    pub fn fixture_link_highlighted(&self, cx: &App) -> bool {
+        self.active_tab(cx)
+            .is_some_and(|tab| tab.emulator.has_highlighted_link())
+    }
+
+    pub fn fixture_has_selection(&self, cx: &App) -> bool {
+        self.active_tab(cx)
+            .is_some_and(|tab| tab.emulator.has_selection())
+    }
+
+    pub fn fixture_take_opened_links(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.fixture_opened_links)
     }
 }
 
