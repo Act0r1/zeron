@@ -15,6 +15,11 @@ DESKTOP="${XDG_DATA_HOME:-$HOME/.local/share}/applications/zeron.desktop"
 UNIT="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/zeron.service"
 
 cd "$ROOT"
+BRANCH="$(git branch --show-current)"
+if [ "$BRANCH" != "main" ]; then
+  echo "Refusing to install from '${BRANCH:-detached HEAD}': switch to main first." >&2
+  exit 1
+fi
 cargo build --release --locked -p zeron
 
 mkdir -p "$DEST" "$HOME/.local/bin"
