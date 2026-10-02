@@ -2299,12 +2299,14 @@ impl FilesSurface {
 
     /// Where the system's default app can open `path`. Only a workspace on
     /// this device shares the viewport's filesystem; remote spaces live on
-    /// another device, so they get no path.
+    /// another device, so they get no path. Neither does a `~` folder whose
+    /// home is unknown.
     fn system_open_path(&self, path: &str) -> Option<std::path::PathBuf> {
-        self.request_context
+        let context = self
+            .request_context
             .as_ref()
-            .filter(|context| context.target_device_id.is_none())
-            .map(|context| std::path::Path::new(&context.cwd).join(path))
+            .filter(|context| context.target_device_id.is_none())?;
+        Some(expand_home(&context.cwd, std::env::home_dir().as_deref())?.join(path))
     }
 
     fn render_breadcrumb(
@@ -3327,6 +3329,17 @@ fn centered_state(message: impl Into<SharedString>, color: gpui::Hsla) -> AnyEle
         .text_color(color)
         .child(message.into())
         .into_any_element()
+}
+
+/// A projectless chat's folder is stored as `~` or `~/…` and expanded by the
+/// engine on the host; this is the same expansion for paths the UI hands to
+/// the system. `None` when the folder needs a home that isn't known.
+fn expand_home(cwd: &str, home: Option<&std::path::Path>) -> Option<std::path::PathBuf> {
+    match cwd.strip_prefix('~') {
+        Some("") => home.map(std::path::Path::to_path_buf),
+        Some(rest) if rest.starts_with('/') => home.map(|home| home.join(&rest[1..])),
+        _ => Some(std::path::PathBuf::from(cwd)),
+    }
 }
 
 /// The read-only line an outside file shows above its content — text or
@@ -4811,6 +4824,25 @@ mod markdown_buffer_tests {
             });
             assert_eq!(surface.system_open_path("src/lib.rs"), None);
         });
+    }
+
+    #[test]
+    fn expand_home_resolves_projectless_chat_folders() {
+        use std::path::{Path, PathBuf};
+
+        let home = Some(Path::new("/home/wing"));
+        assert_eq!(expand_home("~", home), Some(PathBuf::from("/home/wing")));
+        assert_eq!(
+            expand_home("~/proj", home),
+            Some(PathBuf::from("/home/wing/proj"))
+        );
+        assert_eq!(
+            expand_home("/workspace", None),
+            Some(PathBuf::from("/workspace"))
+        );
+        assert_eq!(expand_home("~other", home), Some(PathBuf::from("~other")));
+        assert_eq!(expand_home("~", None), None);
+        assert_eq!(expand_home("~/proj", None), None);
     }
 
     #[gpui::test]
