@@ -15,6 +15,12 @@ pub(super) struct CommandPalette {
     // while this input is still absent from the dispatch tree.
     focus_pending: bool,
     scroll: gpui::ScrollHandle,
+    message_hits: Vec<zeron_proto::MessageSearchHit>,
+    search_loading: bool,
+    search_error: Option<SharedString>,
+    unavailable_chats: usize,
+    search_generation: u64,
+    search_task: Option<Task<()>>,
     _search_events: Subscription,
 }
 
@@ -43,6 +49,11 @@ enum Entry {
     Settings,
     Theme(AppearanceMode),
     Chat(String),
+    Message {
+        chat_id: String,
+        message_id: String,
+        snippet: String,
+    },
 }
 
 impl Entry {
@@ -59,7 +70,7 @@ impl Entry {
                 },
                 mode.icon(),
             )),
-            Self::Chat(_) => None,
+            Self::Chat(_) | Self::Message { .. } => None,
         }
     }
 }
@@ -99,7 +110,7 @@ impl Shell {
         }
         self.add_space = None;
         let search = cx.new(|cx| {
-            ComposerInput::with_context("Search commands and chats…", "PaletteSearch", cx)
+            ComposerInput::with_context("Search messages, chats and commands…", "PaletteSearch", cx)
         });
         let events = cx.subscribe(&search, |this, _, event, cx| {
             if matches!(event, ComposerInputEvent::Edited) {
@@ -107,6 +118,7 @@ impl Shell {
                     palette.active = 0;
                     palette.scroll.set_offset(gpui::point(px(0.0), px(0.0)));
                 }
+                this.search_palette_messages(cx);
                 cx.notify();
             }
         });
@@ -119,6 +131,12 @@ impl Shell {
             enter_press: EnterPress::default(),
             focus_pending: true,
             scroll: gpui::ScrollHandle::new(),
+            message_hits: Vec::new(),
+            search_loading: false,
+            search_error: None,
+            unavailable_chats: 0,
+            search_generation: 0,
+            search_task: None,
             _search_events: events,
         });
         cx.notify();
@@ -131,6 +149,64 @@ impl Shell {
             }
             cx.notify();
         }
+    }
+
+    fn search_palette_messages(&mut self, cx: &mut Context<Self>) {
+        let engine = self.state.read(cx).engine().cloned();
+        let Some(palette) = self.command_palette.as_mut() else {
+            return;
+        };
+        palette.search_task = None;
+        palette.search_generation = palette.search_generation.wrapping_add(1);
+        palette.message_hits.clear();
+        palette.search_error = None;
+        palette.unavailable_chats = 0;
+        let query = palette.search.read(cx).text().trim().to_owned();
+        palette.search_loading = !query.is_empty();
+        if query.is_empty() {
+            return;
+        }
+        let Some(engine) = engine else {
+            palette.search_loading = false;
+            palette.search_error = Some("Connect to the engine to search message contents.".into());
+            return;
+        };
+        let generation = palette.search_generation;
+        let search_id = palette.search.entity_id();
+        palette.search_task = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(std::time::Duration::from_millis(250))
+                .await;
+            let result = engine
+                .client()
+                .call_as::<zeron_proto::MessageSearchResults>(
+                    methods::SEARCH_MESSAGES,
+                    serde_json::json!({"query": query, "limit": HISTORY_RESULT_LIMIT}),
+                )
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                let Some(palette) = this.command_palette.as_mut() else {
+                    return;
+                };
+                if palette.search.entity_id() != search_id
+                    || palette.search_generation != generation
+                {
+                    return;
+                }
+                palette.search_loading = false;
+                match result {
+                    Ok(results) => {
+                        palette.message_hits = results.hits;
+                        palette.unavailable_chats = results.unavailable_chats;
+                    }
+                    Err(error) => {
+                        palette.search_error =
+                            Some(format!("Message search unavailable: {error}").into())
+                    }
+                }
+                cx.notify();
+            });
+        }));
     }
 
     fn command_entries(&self, cx: &App) -> Vec<Entry> {
@@ -181,6 +257,19 @@ impl Shell {
                 .take(HISTORY_RESULT_LIMIT)
                 .map(|chat| Entry::Chat(chat.id.clone())),
         );
+        if !query.is_empty() {
+            entries.extend(
+                palette
+                    .message_hits
+                    .iter()
+                    .filter(|hit| state.chats.iter().any(|chat| chat.id == hit.chat_id))
+                    .map(|hit| Entry::Message {
+                        chat_id: hit.chat_id.clone(),
+                        message_id: hit.message_id.clone(),
+                        snippet: hit.snippet.clone(),
+                    }),
+            );
+        }
         entries
     }
 
@@ -210,6 +299,16 @@ impl Shell {
             Entry::Settings => self.open_last_settings(cx),
             Entry::Theme(_) => unreachable!(),
             Entry::Chat(id) => self.open_chat(id, cx),
+            Entry::Message {
+                chat_id,
+                message_id,
+                ..
+            } => {
+                self.open_chat(chat_id.clone(), cx);
+                self.transcript.update(cx, |transcript, cx| {
+                    transcript.reveal_message(chat_id, message_id, cx)
+                });
+            }
         }
     }
 
@@ -230,8 +329,14 @@ impl Shell {
         let query = search.read(cx).text().to_string();
         let focus = palette.focus.clone();
         let scroll = palette.scroll.clone();
+        let search_loading = palette.search_loading;
+        let search_error = palette.search_error.clone();
+        let unavailable_chats = palette.unavailable_chats;
         let theme = Theme::of(cx).for_popup();
         let action_count = entries.iter().take_while(|e| e.action().is_some()).count();
+        let first_message = entries
+            .iter()
+            .position(|entry| matches!(entry, Entry::Message { .. }));
         let mut rows = Vec::new();
         for (ix, entry) in entries.iter().enumerate() {
             // End spacing belongs to the content, so it scrolls out of the
@@ -246,6 +351,17 @@ impl Shell {
                 .when(ix + 1 == entries.len(), |row| row.pb(px(8.0)));
             if ix == action_count && action_count > 0 {
                 row = row.child(spaces::sidebar_separator(&theme).w_full().my(px(8.0)));
+            }
+            if first_message == Some(ix) {
+                row = row.child(
+                    div()
+                        .px(px(16.0))
+                        .pt(px(8.0))
+                        .pb(px(4.0))
+                        .text_size(crate::typography::ui_rems(10.0))
+                        .text_color(theme.text_muted)
+                        .child("Messages · local history"),
+                );
             }
             let content = if let Some((label, glyph)) = entry.action() {
                 let shortcut = match entry {
@@ -342,6 +458,56 @@ impl Shell {
                     &theme,
                     cx,
                 )
+            } else if let Entry::Message {
+                chat_id, snippet, ..
+            } = entry
+            {
+                let state = self.state.read(cx);
+                let chat = state.chats.iter().find(|chat| &chat.id == chat_id)?;
+                let title = transcript::single_line(chat.title.as_deref().unwrap_or("New session"));
+                let project = state
+                    .space_for_chat(chat)
+                    .map(|space| space.display_name())
+                    .unwrap_or("~");
+                let heading: SharedString = format!("{title} · {project}").into();
+                let snippet: SharedString = transcript::single_line(snippet).into();
+                let entry = entry.clone();
+                popover::menu_row(&theme, ix == active, format!("message-result-{ix}"))
+                    .id(("message-result", ix))
+                    .rounded(px(popover::PALETTE_ITEM_RADIUS))
+                    .role(gpui::Role::Button)
+                    .aria_label(format!("Open message in {title}"))
+                    .py(px(8.0))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.activate_command(entry.clone(), window, cx)
+                    }))
+                    .child(
+                        icon(icons::CHAT_ROUND_LINE)
+                            .size(px(16.0))
+                            .flex_none()
+                            .text_color(theme.text_muted),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .gap(px(3.0))
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_size(crate::typography::ui_rems(11.0))
+                                    .text_color(theme.text_muted)
+                                    .child(heading),
+                            )
+                            .child(div().truncate().child(popover::search_highlight(
+                                snippet,
+                                Some(&query),
+                                &theme,
+                            ))),
+                    )
+                    .into_any_element()
             } else {
                 unreachable!()
             };
@@ -357,12 +523,44 @@ impl Shell {
             .flex_col()
             .gap(px(SIDEBAR_LIST_GAP))
             .children(rows)
-            .when(entries.is_empty(), |el| {
+            .when(
+                entries.is_empty() && !search_loading && search_error.is_none(),
+                |el| {
+                    el.child(palette_empty(
+                        &theme,
+                        "No results",
+                        "Try a message, chat title, project, or command.",
+                    ))
+                },
+            )
+            .when(search_loading, |el| {
                 el.child(palette_empty(
                     &theme,
-                    "No results",
-                    "Try a command, chat title, project, or device.",
+                    "Searching messages…",
+                    "Searching locally saved conversation history.",
                 ))
+            })
+            .when_some(search_error, |el, error| {
+                el.child(
+                    div()
+                        .px(px(16.0))
+                        .py(px(10.0))
+                        .text_size(crate::typography::ui_rems(11.0))
+                        .text_color(theme.text_muted)
+                        .child(error),
+                )
+            })
+            .when(unavailable_chats > 0, |el| {
+                el.child(
+                    div()
+                        .px(px(16.0))
+                        .py(px(8.0))
+                        .text_size(crate::typography::ui_rems(11.0))
+                        .text_color(theme.text_muted)
+                        .child(format!(
+                            "{unavailable_chats} conversations have no searchable local history."
+                        )),
+                )
             });
         let body = palette_results_fade(body, &scroll);
         let card = palette_card("command-palette", &focus, viewport, &theme)

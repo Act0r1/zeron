@@ -1,6 +1,8 @@
 //! Exercise the explorer and editors against an isolated real workspace/RPC.
 //! Set ZERON_FILES_CAPTURES to a directory to run on X11 and capture the fixture.
 use super::*;
+#[path = "../../examples/support/display.rs"]
+mod fixture_display;
 use gpui::{AppContext, AsyncApp, WindowHandle};
 use std::{path::Path, sync::Arc};
 
@@ -55,6 +57,7 @@ async fn frame(window: WindowHandle<Shell>, cx: &mut AsyncApp, output: Option<&P
         })
         .unwrap();
     if let Some(output) = output {
+        fixture_display::require_isolated_display().unwrap();
         std::fs::create_dir_all(output).unwrap();
         let status = std::process::Command::new("import")
             .args(["-window", "Files panel fixture"])
@@ -67,6 +70,9 @@ async fn frame(window: WindowHandle<Shell>, cx: &mut AsyncApp, output: Option<&P
 
 #[test]
 fn files_panel_workspace_navigation_and_external_updates() {
+    if std::env::var_os("ZERON_FILES_CAPTURES").is_some() {
+        fixture_display::require_isolated_display().unwrap();
+    }
     let directory = tempfile::tempdir().unwrap();
     let project = directory.path().join("project");
     std::fs::create_dir_all(project.join("src/nested")).unwrap();

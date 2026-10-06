@@ -9,6 +9,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{Connection, OptionalExtension, params};
 
+mod search;
+
 /// Errors surfaced by [`DocsStore`].
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
@@ -74,6 +76,41 @@ const MIGRATIONS: &[&str] = &[
     CREATE TABLE sync_job_clock (id INTEGER PRIMARY KEY CHECK(id=1), value INTEGER NOT NULL) STRICT;
     INSERT INTO sync_job_clock VALUES (1,0);",
     "ALTER TABLE chat_sync_jobs ADD COLUMN cursor TEXT NOT NULL DEFAULT '';",
+    "CREATE TABLE message_search_state (
+        doc_id TEXT PRIMARY KEY,
+        revision INTEGER NOT NULL DEFAULT 1,
+        indexed_revision INTEGER NOT NULL DEFAULT 0,
+        readable INTEGER NOT NULL DEFAULT 0
+     ) STRICT;
+     INSERT INTO message_search_state(doc_id) SELECT doc_id FROM snapshots;
+     CREATE TABLE message_search_rows (
+        id INTEGER PRIMARY KEY,
+        chat_id TEXT NOT NULL,
+        message_id TEXT NOT NULL,
+        body TEXT NOT NULL
+     ) STRICT;
+     CREATE INDEX message_search_chat ON message_search_rows(chat_id);
+     CREATE VIRTUAL TABLE message_search_fts USING fts5(
+        body, content='message_search_rows', content_rowid='id',
+        tokenize='unicode61 remove_diacritics 2', prefix='2 3 4'
+     );
+     CREATE TRIGGER message_search_add AFTER INSERT ON message_search_rows BEGIN
+        INSERT INTO message_search_fts(rowid,body) VALUES(new.id,new.body);
+     END;
+     CREATE TRIGGER message_search_remove AFTER DELETE ON message_search_rows BEGIN
+        INSERT INTO message_search_fts(message_search_fts,rowid,body) VALUES('delete',old.id,old.body);
+     END;
+     CREATE TRIGGER snapshot_search_add AFTER INSERT ON snapshots BEGIN
+        INSERT INTO message_search_state(doc_id) VALUES(new.doc_id)
+        ON CONFLICT(doc_id) DO UPDATE SET revision=revision+1, readable=0;
+     END;
+     CREATE TRIGGER snapshot_search_update AFTER UPDATE OF bytes ON snapshots BEGIN
+        UPDATE message_search_state SET revision=revision+1, readable=0 WHERE doc_id=new.doc_id;
+     END;
+     CREATE TRIGGER snapshot_search_remove AFTER DELETE ON snapshots BEGIN
+        UPDATE message_search_state SET revision=revision+1, readable=0 WHERE doc_id=old.doc_id;
+        DELETE FROM message_search_rows WHERE chat_id=old.doc_id;
+     END;",
 ];
 
 /// SQLite-backed store under a data directory (`{data_dir}/docs.sqlite3`).
@@ -86,6 +123,7 @@ pub struct DocsStore {
     failed_publications: Mutex<HashSet<String>>,
     /// Snapshot jobs wait here asynchronously before entering the blocking pool.
     pub snapshot_writer: std::sync::Arc<tokio::sync::Mutex<()>>,
+    pub message_search_gate: std::sync::Arc<tokio::sync::Mutex<()>>,
 }
 
 impl DocsStore {
@@ -102,6 +140,7 @@ impl DocsStore {
             conn: Mutex::new(conn),
             failed_publications: Mutex::new(HashSet::new()),
             snapshot_writer: std::sync::Arc::new(tokio::sync::Mutex::new(())),
+            message_search_gate: std::sync::Arc::new(tokio::sync::Mutex::new(())),
         })
     }
 

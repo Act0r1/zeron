@@ -201,7 +201,7 @@ fn listening_is_not_emitted_until_device_opens_and_stop_during_open_is_safe() {
 }
 
 #[test]
-fn recording_limit_closes_capture_while_model_is_still_loading() {
+fn ended_recording_closes_capture_while_model_is_still_loading() {
     let f = Fixture::new(None);
     f.listening();
     f.ended.store(true, Ordering::Release);
@@ -284,15 +284,13 @@ fn ready_model_waits_for_stop_and_transcribes_only_once() {
 }
 
 #[test]
-fn audio_buffer_still_caps_recording_at_sixty_seconds() {
+fn audio_buffer_retains_recording_beyond_sixty_seconds() {
     let audio = Audio::with_capacity(0);
     let rate = 8_000;
-    append(
-        &vec![0.25_f32; rate as usize * MAX_SECONDS + 1],
-        1,
-        rate,
-        &audio,
-    );
-    assert_eq!(audio.samples.lock().unwrap().len(), rate as usize * 60);
-    assert!(audio.full.load(Ordering::Acquire));
+    let samples = vec![0.25_f32; rate * 120];
+    for chunk in samples.chunks(1024) {
+        append(chunk, 1, &audio);
+    }
+    assert_eq!(*audio.samples.lock().unwrap(), samples);
+    assert!(!audio.failed.load(Ordering::Acquire));
 }

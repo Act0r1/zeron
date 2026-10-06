@@ -3080,6 +3080,7 @@ pub struct Transcript {
     saved_viewports: SavedViewportCache,
     /// An anchored viewport waiting for the selected chat's async replay.
     pending_viewport: Option<SavedViewport>,
+    pending_message: Option<(String, String)>,
     /// Generation of the selected chat, guarding post-layout restoration
     /// callbacks across rapid A→B→A navigation.
     viewport_generation: u64,
@@ -3495,6 +3496,7 @@ impl Transcript {
             doc_override,
             saved_viewports: SavedViewportCache::default(),
             pending_viewport: None,
+            pending_message: None,
             viewport_generation: 0,
             viewport_finalize_pending: false,
             viewport_finalize_scheduled: false,
@@ -3716,6 +3718,7 @@ impl Transcript {
     /// Hand viewport ownership to explicit rail/navigation input before its
     /// reduced-motion or animated branch moves the list.
     pub(crate) fn begin_scroll_navigation(&mut self) {
+        self.pending_message = None;
         self.discard_pending_viewport();
         self.cancel_user_hold();
         self.user_collapse_scroll = None;
@@ -3771,6 +3774,7 @@ impl Transcript {
     }
 
     fn handle_scroll(&mut self, _event: &ListScrollEvent, cx: &mut Context<Self>) {
+        self.pending_message = None;
         // Cancel synchronously, before a queued animation frame can undo the
         // wheel/touch input. Neither operation reads the borrowed ListState.
         self.user_collapse_scroll = None;
@@ -4559,6 +4563,41 @@ impl Transcript {
         }
     }
 
+    pub(crate) fn reveal_message(
+        &mut self,
+        chat_id: String,
+        message_id: String,
+        cx: &mut Context<Self>,
+    ) {
+        self.pending_message = Some((chat_id, message_id));
+        self.last_source = None;
+        self.sync(cx);
+    }
+
+    fn reveal_pending_message(&mut self) {
+        let Some((chat, message)) = self.pending_message.as_ref() else {
+            return;
+        };
+        if self.chat_id.as_ref() != Some(chat) {
+            return;
+        }
+        let Some(index) = self
+            .rows
+            .iter()
+            .position(|row| row.entry_id.as_ref() == message.as_str())
+        else {
+            return;
+        };
+        self.begin_scroll_navigation();
+        self.land_end_pending = false;
+        self.viewport_finalize_pending = false;
+        self.list.scroll_to(ListOffset {
+            item_ix: index,
+            offset_in_item: px(0.0),
+        });
+        self.show_jump_button = true;
+    }
+
     /// Rebuild rows from app state; splice minimal ranges into the list.
     fn sync(&mut self, cx: &mut Context<Self>) {
         if self.retain_on_deselect
@@ -4596,6 +4635,13 @@ impl Transcript {
             replay,
             self.state.read(cx).transcript_revision,
         );
+        if self
+            .pending_message
+            .as_ref()
+            .is_some_and(|(chat, _)| selected.as_ref() != Some(chat))
+        {
+            self.pending_message = None;
+        }
         if self.last_source.as_ref() == Some(&source) {
             return;
         }
@@ -5003,6 +5049,10 @@ impl Transcript {
                     cx.notify();
                 }
                 self.promote_materialized_queued_turn(attached, cx);
+                if self.pending_message.is_some() {
+                    self.reveal_pending_message();
+                    cx.notify();
+                }
                 return;
             }
             Some((old_range, count)) => {
@@ -5087,6 +5137,7 @@ impl Transcript {
                 self.spring_kick = true;
             }
         }
+        self.reveal_pending_message();
         cx.notify();
     }
 
@@ -5155,6 +5206,24 @@ impl Transcript {
                     rows: rows.clone(),
                 },
             );
+        }
+        if self
+            .pending_message
+            .as_ref()
+            .is_some_and(|(_, message)| message == &entry.id)
+        {
+            for row in &rows {
+                if let Some(id) = &row.compact_fold {
+                    let fold = self.folds.entry(id.clone()).or_default();
+                    fold.open = Some(true);
+                    fold.toggled_at = None;
+                }
+                if matches!(row.kind, RowKind::User { .. }) {
+                    let fold = self.user_folds.entry(row.id.clone()).or_default();
+                    fold.open = Some(true);
+                    fold.toggled_at = None;
+                }
+            }
         }
         rows.retain(|row| match &row.compact_fold {
             None => true,

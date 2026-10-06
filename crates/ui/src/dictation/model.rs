@@ -400,7 +400,7 @@ impl Render for VoiceCard {
                         .child(widgets::row_title(&theme, "Shortcut"))
                         .child(widgets::meta_line(
                             &theme,
-                            vec!["Hold to talk, release to transcribe".into_any_element()],
+                            vec!["Click to start/stop, or hold to talk".into_any_element()],
                         )),
                 )
                 .child(field)

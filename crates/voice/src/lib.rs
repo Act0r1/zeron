@@ -14,7 +14,6 @@ use std::{
 
 mod resample;
 
-pub const MAX_SECONDS: usize = 60;
 #[derive(serde::Deserialize)]
 pub struct Artifact {
     pub name: String,
@@ -100,9 +99,6 @@ impl Recognizer {
         if !(8_000..=192_000).contains(&rate) {
             bail!("Unsupported microphone sample rate")
         }
-        if samples.len() > rate as usize * MAX_SECONDS {
-            bail!("Recording exceeds one minute")
-        }
         if samples.len() < rate as usize / 5 || samples.iter().all(|s| s.abs() < 0.0001) {
             return Ok(String::new());
         }
@@ -120,14 +116,12 @@ struct Audio {
     // Outside the lock: the capture loop polls these every 10 ms and must
     // never make the real-time callback's `try_lock` drop a buffer.
     failed: AtomicBool,
-    full: AtomicBool,
 }
 impl Audio {
     fn with_capacity(capacity: usize) -> Self {
         Self {
             samples: Mutex::new(Vec::with_capacity(capacity)),
             failed: AtomicBool::new(false),
-            full: AtomicBool::new(false),
         }
     }
 }
@@ -153,16 +147,12 @@ where
         level.fetch_max(rms.to_bits(), Ordering::Relaxed);
     }
 }
-fn append<T: cpal::Sample>(data: &[T], channels: usize, rate: u32, a: &Audio)
+fn append<T: cpal::Sample>(data: &[T], channels: usize, a: &Audio)
 where
     f32: cpal::FromSample<T>,
 {
     if let Ok(mut samples) = a.samples.try_lock() {
         for frame in data.chunks_exact(channels) {
-            if samples.len() >= rate as usize * MAX_SECONDS {
-                a.full.store(true, Ordering::Release);
-                break;
-            }
             samples.push(frame.iter().map(|s| s.to_sample::<f32>()).sum::<f32>() / channels as f32);
         }
     }
@@ -222,19 +212,17 @@ impl Capture {
         let config = device.default_input_config()?;
         let rate = config.sample_rate();
         let channels = config.channels() as usize;
-        let audio = Arc::new(Audio::with_capacity(rate as usize * MAX_SECONDS));
+        let audio = Arc::new(Audio::with_capacity(rate as usize));
         let a = audio.clone();
         let e = audio.clone();
         let err = move |_| e.failed.store(true, Ordering::Release);
-        // Preserve the device's native configuration; convert every CPAL
-        // sample representation through the same bounded mono callback.
         macro_rules! stream {
             ($sample:ty) => {
                 device.build_input_stream(
                     &config.into(),
                     move |d: &[$sample], _| {
                         meter(d, channels, &level);
-                        append(d, channels, rate, &a)
+                        append(d, channels, &a)
                     },
                     err,
                     None,
@@ -264,7 +252,7 @@ impl Capture {
         })
     }
     pub fn ended(&self) -> bool {
-        self.audio.full.load(Ordering::Acquire) || self.audio.failed.load(Ordering::Acquire)
+        self.audio.failed.load(Ordering::Acquire)
     }
     pub fn finish(mut self) -> Result<(Vec<f32>, u32)> {
         self.stream.take();
@@ -321,11 +309,9 @@ fn record<C: Recording>(
     if !job.stop.load(Ordering::Acquire) {
         let _ = job.events.try_send(Event::Listening);
     }
-    let started = std::time::Instant::now();
     while !job.stop.load(Ordering::Acquire)
         && !job.cancel.load(Ordering::Acquire)
         && !capture.ended()
-        && started.elapsed().as_secs() < MAX_SECONDS as u64
     {
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
@@ -542,7 +528,7 @@ mod tests {
                 .into_iter()
                 .map(|s| s.to_sample::<T>())
                 .collect();
-            append(&input, 2, 16_000, &audio);
+            append(&input, 2, &audio);
             assert_eq!(*audio.samples.lock().unwrap(), vec![0.0, 0.5, 0.0]);
             let level = AtomicU32::new(0);
             meter(&input, 2, &level);

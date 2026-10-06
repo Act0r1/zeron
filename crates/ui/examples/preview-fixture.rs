@@ -2,12 +2,15 @@
 use gpui::{AppContext, AsyncApp, Bounds, WindowBounds, WindowOptions, px, size};
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use zeron_ui::*;
+#[path = "support/display.rs"]
+mod display;
 async fn pause(cx: &mut AsyncApp, ms: u64) {
     cx.background_executor()
         .timer(Duration::from_millis(ms))
         .await;
 }
 fn capture(directory: &std::path::Path, name: &str) -> anyhow::Result<()> {
+    display::require_isolated_display()?;
     let path = directory.join(format!("{name}.png"));
     #[cfg(target_os = "macos")]
     let status = {
@@ -66,6 +69,7 @@ fn port() -> u16 {
         .port()
 }
 fn main() -> anyhow::Result<()> {
+    display::require_isolated_display()?;
     tracing_subscriber::fmt().with_env_filter("warn").init();
     let output = PathBuf::from(std::env::args().nth(1).expect("capture directory"));
     std::fs::create_dir_all(&output)?;

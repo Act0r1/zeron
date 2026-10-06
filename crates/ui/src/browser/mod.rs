@@ -9,6 +9,8 @@ use linux as native;
 use macos as native;
 pub mod model;
 mod view;
+#[cfg(target_os = "linux")]
+mod capture;
 
 use crate::composer::{ComposerInput, ComposerInputEvent};
 use gpui::{
@@ -65,6 +67,18 @@ pub enum BrowserEvent {
     Changed,
     NewTab(Option<String>),
     Close,
+    Capture(BrowserCapture),
+}
+
+#[derive(Clone, Debug)]
+pub struct BrowserCapture {
+    pub png: Vec<u8>,
+    pub url: String,
+    pub title: String,
+    pub viewport_width: u32,
+    pub viewport_height: u32,
+    pub feedback: String,
+    pub message: String,
 }
 
 /// A window/profile's ephemeral website data, allocated on first navigation.
@@ -75,6 +89,10 @@ pub struct BrowserContext {
 }
 
 pub struct BrowserSurface {
+    #[cfg(target_os = "linux")]
+    capture: Option<capture::CaptureDraft>,
+    #[cfg(target_os = "linux")]
+    capture_task: Option<gpui::Task<()>>,
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     context: BrowserContext,
     address: Entity<ComposerInput>,
@@ -123,7 +141,7 @@ impl BrowserSurface {
     ) -> Self {
         let address = cx.new(|cx| {
             ComposerInput::with_context("Website or localhost:3000", "PaletteSearch", cx)
-                .with_text_metrics(11.0, 16.0)
+                .with_text_metrics(12.0, 18.0)
                 .with_single_line()
                 .with_accessibility_role(gpui::Role::TextInput)
         });
@@ -153,6 +171,10 @@ impl BrowserSurface {
         #[cfg(not(any(target_os = "macos", target_os = "linux")))]
         let _ = (window, context);
         Self {
+            #[cfg(target_os = "linux")]
+            capture: None,
+            #[cfg(target_os = "linux")]
+            capture_task: None,
             #[cfg(any(target_os = "macos", target_os = "linux"))]
             context,
             address,
@@ -239,6 +261,8 @@ impl BrowserSurface {
             return;
         }
         self.presentation = presentation;
+        #[cfg(target_os = "linux")]
+        let presentation = if self.capture.is_some() { Presentation::Hidden } else { presentation };
         #[cfg(any(target_os = "macos", target_os = "linux"))]
         if let Some(native) = &mut self.native {
             native.present(presentation);
@@ -413,6 +437,11 @@ impl BrowserSurface {
     }
 
     pub fn close(&mut self, cx: &mut Context<Self>) {
+        #[cfg(target_os = "linux")]
+        {
+            self.capture_task = None;
+            self.capture = None;
+        }
         self.set_presentation(Presentation::Hidden, cx);
         self.clear_favicon(cx);
         #[cfg(any(target_os = "macos", target_os = "linux"))]

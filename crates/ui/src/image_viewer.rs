@@ -1,9 +1,11 @@
 //! Shared image geometry and native pointer gestures. Scaling reuses the texture.
 use gpui::{
-    AnyElement, App, Bounds, Image, MouseButton, Pixels, Point, ScrollDelta, Size, TouchPhase,
-    Window, div, point, prelude::*, px, size,
+    AnyElement, App, Bounds, FocusHandle, Image, MouseButton, Pixels, Point, ScrollDelta, Size,
+    TouchPhase, Window, div, point, prelude::*, px, size,
 };
 use std::{cell::RefCell, rc::Rc, sync::Arc};
+
+mod clipboard;
 
 #[derive(Clone, Default)]
 pub(crate) struct ImageView(Rc<RefCell<ViewState>>);
@@ -16,6 +18,15 @@ struct ViewState {
     drag: Option<(Point<f32>, Point<f32>)>,
     dragged: bool,
     pinch: Option<(f32, f32)>,
+    menu: Option<ImageMenu>,
+    copying: bool,
+    copy_error: Option<String>,
+}
+
+struct ImageMenu {
+    position: Point<Pixels>,
+    focus: FocusHandle,
+    previous_focus: Option<FocusHandle>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -202,6 +213,110 @@ impl ImageView {
         *self.0.borrow_mut() = ViewState::default();
     }
 
+    fn close_menu(&self, window: &mut Window, cx: &mut App) {
+        let menu = self.0.borrow_mut().menu.take();
+        if let Some(menu) = menu {
+            if menu.focus.is_focused(window)
+                && let Some(previous) = menu.previous_focus
+            {
+                previous.focus(window, cx);
+            }
+            window.refresh();
+        }
+    }
+
+    fn copy_image(&self, image: Arc<Image>, window: &mut Window, cx: &mut App) {
+        {
+            let mut state = self.0.borrow_mut();
+            if state.copying {
+                return;
+            }
+            state.copying = true;
+            state.copy_error = None;
+        }
+        let copy = clipboard::copy(image, cx);
+        let this = self.clone();
+        window.refresh();
+        window
+            .spawn(cx, async move |cx| {
+                let result = copy.await;
+                let _ = cx.update(|window, cx| {
+                    this.0.borrow_mut().copying = false;
+                    match result {
+                        Ok(()) => this.close_menu(window, cx),
+                        Err(error) => {
+                            tracing::warn!(%error, "Could not copy image");
+                            this.0.borrow_mut().copy_error = Some(error);
+                        }
+                    }
+                    window.refresh();
+                });
+            })
+            .detach();
+    }
+
+    fn render_menu(&self, image: Arc<Image>, cx: &App) -> Option<AnyElement> {
+        let state = self.0.borrow();
+        let menu = state.menu.as_ref()?;
+        let theme = crate::theme::Theme::of(cx).for_popup();
+        let dismiss = self.clone();
+        let keys = self.clone();
+        let copy = self.clone();
+        let key_image = image.clone();
+        let card = crate::popover::popover_card(&theme)
+            .id("image-context-menu-card")
+            .track_focus(&menu.focus)
+            .w(px(200.0))
+            .flex()
+            .flex_col()
+            .on_mouse_down_out(move |_, window, cx| dismiss.close_menu(window, cx))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
+            .on_click(|_, _, cx| cx.stop_propagation())
+            .on_key_down(move |event, window, cx| {
+                match event.keystroke.key.as_str() {
+                    "escape" => keys.close_menu(window, cx),
+                    "enter" | "space" => keys.copy_image(key_image.clone(), window, cx),
+                    _ => {}
+                }
+                cx.stop_propagation();
+                window.prevent_default();
+            })
+            .child(
+                crate::popover::menu_row(&theme, false, "image-context-copy")
+                    .id("image-context-copy")
+                    .role(gpui::Role::MenuItem)
+                    .aria_label("Copy image")
+                    .when(state.copying, |row| row.opacity(0.5).cursor_default())
+                    .on_click(move |_, window, cx| {
+                        cx.stop_propagation();
+                        copy.copy_image(image.clone(), window, cx);
+                    })
+                    .child(crate::icons::icon(crate::icons::COPY).size(px(16.0)))
+                    .child(if state.copying {
+                        "Copying…"
+                    } else {
+                        "Copy image"
+                    }),
+            )
+            .when_some(state.copy_error.clone(), |card, error| {
+                card.child(
+                    div()
+                        .px(px(8.0))
+                        .text_size(px(11.0))
+                        .text_color(theme.danger)
+                        .child(format!("Could not copy image: {error}")),
+                )
+            });
+        Some(crate::popover::menu_at_layer(
+            "image-context-menu",
+            menu.position,
+            card.into_any_element(),
+            None,
+            4,
+        ))
+    }
+
     pub fn render(
         &self,
         image: Arc<Image>,
@@ -209,7 +324,7 @@ impl ImageView {
         on_image_click: Option<ImageClick>,
         plate: Option<gpui::Hsla>,
         _window: &mut Window,
-        _cx: &mut App,
+        cx: &mut App,
     ) -> AnyElement {
         let natural = size(f32::from(natural.width), f32::from(natural.height));
         {
@@ -230,6 +345,8 @@ impl ImageView {
         let up = self.clone();
         let up_out = self.clone();
         let click = self.clone();
+        let context_menu = self.clone();
+        let menu = self.render_menu(image.clone(), cx);
         let viewport = div()
             .id("image-viewport")
             .flex_1()
@@ -259,6 +376,23 @@ impl ImageView {
                 down.0.borrow_mut().pointer_down(event.position);
                 window.prevent_default();
             })
+            .on_mouse_down(MouseButton::Right, move |event, window, cx| {
+                context_menu.close_menu(window, cx);
+                let focus = cx.focus_handle();
+                let previous_focus = window.focused(cx);
+                focus.focus(window, cx);
+                let mut state = context_menu.0.borrow_mut();
+                state.drag = None;
+                state.copy_error = None;
+                state.menu = Some(ImageMenu {
+                    position: event.position,
+                    focus,
+                    previous_focus,
+                });
+                cx.stop_propagation();
+                window.prevent_default();
+                window.refresh();
+            })
             .on_mouse_up(MouseButton::Left, move |_, _, _| {
                 up.0.borrow_mut().drag = None;
             })
@@ -266,6 +400,12 @@ impl ImageView {
                 up_out.0.borrow_mut().drag = None;
             })
             .on_click(move |event, window, cx| {
+                if let gpui::ClickEvent::Mouse(event) = event
+                    && event.down.button != MouseButton::Left
+                {
+                    cx.stop_propagation();
+                    return;
+                }
                 let state = click.0.borrow();
                 if state.dragged {
                     cx.stop_propagation();
@@ -349,6 +489,7 @@ impl ImageView {
             .flex()
             .flex_col()
             .child(viewport)
+            .children(menu)
             .into_any_element()
     }
 }

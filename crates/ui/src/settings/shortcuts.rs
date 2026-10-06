@@ -1102,7 +1102,7 @@ mod tests {
         )
         .unwrap();
         assert!(
-            notice.ends_with("Hold to dictate in Settings → Voice."),
+            notice.ends_with("Dictation in Settings → Voice."),
             "{notice}"
         );
         // Settings → Shortcuts, opened later with an older copy, adopts the

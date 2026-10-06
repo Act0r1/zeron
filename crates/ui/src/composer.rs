@@ -1578,6 +1578,9 @@ fn input_bindings(context: &'static str) -> Vec<KeyBinding> {
 
 /// Bind the composer keymap. Call once at app boot.
 pub fn init(cx: &mut App, send_behavior: ComposerSendBehavior) {
+    let mut browser_comment_bindings = input_bindings("BrowserComment");
+    browser_comment_bindings.push(KeyBinding::new("enter", Newline, Some("BrowserComment")));
+    cx.bind_keys(browser_comment_bindings);
     let mut generic_bindings = input_bindings(GENERIC_COMPOSER_CONTEXT);
     generic_bindings.push(KeyBinding::new(
         "enter",
@@ -1716,8 +1719,6 @@ struct DictationKey {
     _blur: Subscription,
 }
 
-/// Dictation is hold to talk, from the microphone (pointer or Enter/Space
-/// while it is focused) and from the shortcut. Each releases only its own hold.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HoldSource {
     Pointer,
@@ -1732,8 +1733,6 @@ struct DictationHold {
     started: Option<Instant>,
 }
 
-/// A release sooner than this is a click, not speech: explain hold to talk
-/// instead of transcribing a fraction of a second of audio.
 const DICTATION_TAP: Duration = Duration::from_millis(300);
 impl EventEmitter<DictationInputEvent> for ComposerInput {}
 
@@ -1741,7 +1740,6 @@ impl EventEmitter<DictationInputEvent> for ComposerInput {}
 /// window before the recording limit.
 const VOICE_MORPH: Duration = Duration::from_millis(420);
 const VOICE_CURVE: motion::CubicBezier = motion::CubicBezier::new(0.2, 0.0, 0.0, 1.0);
-const VOICE_LIMIT_WARNING: Duration = Duration::from_secs(10);
 /// Height of the voice track and its gap to the Stop control.
 const VOICE_TRACK_HEIGHT: f32 = 32.0;
 const VOICE_TRACK_GAP: f32 = 8.0;
@@ -2021,6 +2019,12 @@ impl ComposerInput {
         self.configured_line_height = line_height;
         self.line_height = px(line_height);
         self.content_height = line_height;
+        self
+    }
+
+    pub fn with_viewport_height(mut self, height: f32) -> Self {
+        self.viewport_height = Some(height);
+        self.settled_viewport_height = Some(height);
         self
     }
 
@@ -2442,6 +2446,12 @@ impl ComposerInput {
         self.dictation_task = None;
     }
 
+    fn prepare_dictation_edit(&mut self) {
+        if !self.dictation.allow_draft_edit() {
+            self.cancel_dictation();
+        }
+    }
+
     fn begin_dictation(
         &mut self,
         transcriber: Box<dyn crate::dictation::Transcriber>,
@@ -2513,6 +2523,10 @@ impl ComposerInput {
     }
 
     fn apply_dictation(&mut self, text: &str, cx: &mut Context<Self>) {
+        self.dictation.follow_draft(
+            &self.content,
+            self.projection.normalize_range(self.selected_range.clone()),
+        );
         let before = (!self.dictation.has_partial && !text.is_empty()).then(|| self.snapshot());
         if let Some(cursor) = self.dictation.replace(&mut self.content, text) {
             if let Some(before) = before {
@@ -2522,8 +2536,6 @@ impl ComposerInput {
                 }
                 self.redo_stack.clear();
             }
-            // Moving the selection explicitly stops dictation (see move_to /
-            // select_to). The original selection collapses on the first result.
             self.selected_range = cursor..cursor;
             self.selection_reversed = false;
             self.caret_affinity = CaretAffinity::Downstream;
@@ -2543,6 +2555,18 @@ impl ComposerInput {
         use crate::dictation::{Event, Phase};
         if generation != self.dictation.generation || !self.dictation.phase.active() {
             return false;
+        }
+        if self.dictation.timed_out(Instant::now()) {
+            self.complete_dictation(
+                Phase::Failed(
+                    "Dictation took too long. Your draft is safe. Wait a moment, then try a shorter recording.".into(),
+                ),
+                cx,
+            );
+            return false;
+        }
+        if self.dictation.hands_free && self.marked_range.is_some() {
+            return true;
         }
         while let Some(event) = self.transcriber.as_mut().and_then(|service| service.poll()) {
             match event {
@@ -2592,15 +2616,6 @@ impl ComposerInput {
                 // stepped reduced-motion waveform current.
                 cx.emit(DictationInputEvent::Changed);
             }
-        }
-        if self.dictation.timed_out(Instant::now()) {
-            self.complete_dictation(
-                Phase::Failed(
-                    "Dictation took too long. Your draft is safe. Wait a moment, then try a shorter recording.".into(),
-                ),
-                cx,
-            );
-            return false;
         }
         true
     }
@@ -2686,7 +2701,7 @@ impl ComposerInput {
     /// Called with the range about to be replaced, BEFORE the content changes,
     /// so the pushed snapshot is the pre-edit state.
     fn record_edit(&mut self, range: &Range<usize>, new_text: &str) {
-        self.cancel_dictation();
+        self.prepare_dictation_edit();
         let kind = if new_text.is_empty() {
             EditKind::Delete
         } else {
@@ -2795,7 +2810,7 @@ impl ComposerInput {
     }
 
     fn move_to(&mut self, offset: usize, cx: &mut Context<Self>) {
-        self.cancel_dictation();
+        self.prepare_dictation_edit();
         self.last_edit = None;
         let offset = self.projection.normalize_range(offset..offset).start;
         self.selected_range = offset..offset;
@@ -2809,7 +2824,7 @@ impl ComposerInput {
     }
 
     fn select_to(&mut self, offset: usize, cx: &mut Context<Self>) {
-        self.cancel_dictation();
+        self.prepare_dictation_edit();
         self.last_edit = None;
         self.extend_selection(offset, cx);
     }
@@ -4309,7 +4324,7 @@ impl EntityInputHandler for ComposerInput {
         if self.read_only {
             return;
         }
-        self.cancel_dictation();
+        self.prepare_dictation_edit();
         let single_line_text;
         let new_text = if self.single_line {
             single_line_text = new_text.replace(['\r', '\n'], " ");
@@ -4358,7 +4373,7 @@ impl EntityInputHandler for ComposerInput {
         if self.read_only {
             return;
         }
-        self.cancel_dictation();
+        self.prepare_dictation_edit();
         let single_line_text;
         let new_text = if self.single_line {
             single_line_text = new_text.replace(['\r', '\n'], " ");
@@ -6124,6 +6139,42 @@ impl Composer {
 
     pub fn stage_appshot(&mut self, appshot: CapturedAppshot, cx: &mut Context<Self>) {
         self.stage_appshot_for(self.current_key.clone(), appshot, cx);
+    }
+
+    pub fn stage_browser_capture_for(
+        &mut self,
+        key: String,
+        appshot: CapturedAppshot,
+        message: &str,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.stage_appshot_for(key.clone(), appshot, cx) {
+            return false;
+        }
+        if message.trim().is_empty() {
+            return true;
+        }
+        let append = |text: &mut String| {
+            if !text.trim().is_empty() {
+                text.push_str("\n\n");
+            }
+            text.push_str(message.trim());
+        };
+        if key == self.current_key {
+            if self.queue_edit_finishing
+                && let Some((text, _, _)) = &mut self.queue_edit_draft
+            {
+                append(text);
+            } else {
+                let mut text = self.input.read(cx).text().to_owned();
+                append(&mut text);
+                self.input.update(cx, |input, cx| input.set_text(text, cx));
+            }
+        } else {
+            append(self.drafts.entry(key).or_default());
+        }
+        cx.notify();
+        true
     }
 
     pub fn stage_appshot_for(
@@ -9279,12 +9330,7 @@ impl Composer {
         }
         self.input
             .update(cx, |input, cx| match input.dictation.phase {
-                Phase::Requesting => {
-                    input.cancel_dictation();
-                    cx.emit(DictationInputEvent::Changed);
-                    cx.notify();
-                }
-                Phase::Listening => {
+                Phase::Requesting | Phase::Listening => {
                     input.finish_dictation(false, cx);
                 }
                 // The voice track's Cancel stops transcription.
@@ -9298,6 +9344,7 @@ impl Composer {
                 _ => {
                     if let Some(service) = crate::dictation::start(cx) {
                         input.begin_dictation(service, cx);
+                        input.dictation.hands_free = true;
                     }
                 }
             });
@@ -9305,9 +9352,6 @@ impl Composer {
         cx.notify();
     }
 
-    /// Hold to talk: the microphone or the shortcut going down starts
-    /// dictation. Pressing during a session started by assistive Click takes
-    /// it over, so releasing finishes it.
     fn press_dictation(&mut self, source: HoldSource, cx: &mut Context<Self>) {
         use crate::dictation::Phase;
         let phase = self.input.read(cx).dictation.phase.clone();
@@ -9334,6 +9378,8 @@ impl Composer {
             _ => {
                 self.toggle_dictation(source != HoldSource::Button, cx);
                 if self.input.read(cx).dictation.phase.active() {
+                    self.input
+                        .update(cx, |input, _| input.dictation.hands_free = false);
                     self.dictation_hold = Some(DictationHold {
                         source,
                         started: Some(Instant::now()),
@@ -9343,8 +9389,6 @@ impl Composer {
         }
     }
 
-    /// Letting go transcribes what was said. A tap explains hold to talk,
-    /// and a release that only answered the permission prompt records nothing.
     fn release_dictation(&mut self, source: HoldSource, cx: &mut Context<Self>) {
         use crate::dictation::Phase;
         if self
@@ -9367,8 +9411,7 @@ impl Composer {
                     cx.notify();
                 }
                 Phase::Requesting | Phase::Listening if tapped => {
-                    input.cancel_dictation();
-                    input.dictation.phase = Phase::Tapped;
+                    input.dictation.hands_free = true;
                     cx.emit(DictationInputEvent::Changed);
                     cx.notify();
                 }
@@ -9400,7 +9443,9 @@ impl Composer {
         let theme = Theme::of(cx).clone();
         let phase = self.input.read(cx).dictation.phase.clone();
         let active = phase.active();
-        let label = phase.action_label().to_owned();
+        let label = phase
+            .action_label(self.input.read(cx).dictation.hands_free)
+            .to_owned();
         let live = frame.is_some_and(|f| f.mode == Mode::Live);
         let glow = frame.map_or(0.0, |f| f.level * f.level.sqrt());
         // Spinner while the microphone opens or the model transcribes; the
@@ -9583,7 +9628,7 @@ impl Composer {
         if phase.active() {
             return None;
         }
-        let (title, detail) = phase.status()?;
+        let (title, detail) = phase.status(self.input.read(cx).dictation.hands_free)?;
         let (title, detail) = (title.to_owned(), detail.to_owned());
         let phase = &phase;
         let failed = matches!(
@@ -9659,7 +9704,7 @@ impl Composer {
             };
             let label = dictation
                 .phase
-                .status()
+                .status(dictation.hands_free)
                 .map(|(title, detail)| format!("{title}. {detail}"))
                 .unwrap_or_default();
             self.voice_last = Some(VoiceFrame {
@@ -9701,15 +9746,12 @@ impl Composer {
         let active = self.input.read(cx).dictation.phase.active();
         let live = frame.mode == waveform::Mode::Live && active;
         let clock = frame.elapsed.map(|elapsed| {
-            let limit = Duration::from_secs(zeron_voice::MAX_SECONDS as u64);
             div()
                 .flex_none()
                 .font_family(theme.font_mono.clone())
                 .text_size(px(11.0))
                 .opacity(t)
-                .text_color(if live && elapsed + VOICE_LIMIT_WARNING >= limit {
-                    theme.warning
-                } else if live {
+                .text_color(if live {
                     theme.text_muted
                 } else {
                     theme.text_faint
@@ -9855,12 +9897,10 @@ impl Focusable for Composer {
 impl Render for Composer {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if self.dictation_blur.is_none() {
-            // Stop, Send and keyboard navigation within the composer must not
-            // discard capture. Only leaving the whole composer invalidates it.
             let focus = self.dictation_focus.clone();
             self.dictation_blur = Some(cx.on_focus_out(&focus, window, |this, _, _, cx| {
                 this.input.update(cx, |input, cx| {
-                    if !input.dictation.phase.active() {
+                    if !input.dictation.phase.active() || input.dictation.hands_free {
                         return;
                     }
                     if input.dictation.phase == crate::dictation::Phase::Requesting
@@ -9879,7 +9919,7 @@ impl Render for Composer {
                 Some(cx.observe_window_activation(window, |this, window, cx| {
                     if !window.is_window_active() {
                         this.input.update(cx, |input, cx| {
-                            if !input.dictation.phase.active() {
+                            if !input.dictation.phase.active() || input.dictation.hands_free {
                                 return;
                             }
                             // The permission bridge checks the originating key

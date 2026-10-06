@@ -533,7 +533,7 @@ fn dictation_pointer_hold_finishes_on_release_even_outside_the_button(cx: &mut T
 }
 
 #[gpui::test]
-fn dictation_tap_explains_hold_to_talk_without_transcribing(cx: &mut TestAppContext) {
+fn dictation_tap_keeps_recording_while_typing_until_second_click(cx: &mut TestAppContext) {
     let (dir, handle) = super::tests::composer_focus_window(cx);
     enable_dictation(dir.path(), cx);
     let fake = handle
@@ -562,15 +562,44 @@ fn dictation_tap_explains_hold_to_talk_without_transcribing(cx: &mut TestAppCont
         gpui::Modifiers::default(),
     );
     assert_eq!(fake.borrow().finishes, 0);
-    assert_eq!(fake.borrow().drops, 1, "a tap releases the microphone");
+    assert_eq!(fake.borrow().drops, 0, "a tap keeps the microphone open");
     handle
         .read_with(cx, |composer, cx| {
             let input = composer.input.read(cx);
-            assert_eq!(input.dictation.phase, Phase::Tapped);
+            assert_eq!(input.dictation.phase, Phase::Listening);
+            assert!(input.dictation.hands_free);
             assert_eq!(input.text(), "keep");
             assert!(composer.dictation_hold.is_none());
         })
         .unwrap();
+    handle
+        .update(cx, |composer, window, cx| {
+            composer.input.update(cx, |input, cx| {
+                input.replace_text_in_range(None, " typed ", window, cx);
+                assert_eq!(input.dictation.phase, Phase::Listening);
+                assert_eq!(fake.borrow().drops, 0);
+                input.move_to(0, cx);
+                input.replace_text_in_range(None, "Привет ", window, cx);
+                input.move_to(input.content.len(), cx);
+                input.replace_and_mark_text_in_range(None, "に", None, window, cx);
+            });
+            composer.press_dictation(HoldSource::Pointer, cx);
+            composer.release_dictation(HoldSource::Pointer, cx);
+            composer.input.update(cx, |input, cx| {
+                deliver(input, &fake, [Event::Final("speech".into())], cx);
+                assert_eq!(input.dictation.phase, Phase::Finalizing);
+                input.replace_text_in_range(None, "日本語 ", window, cx);
+                assert_eq!(input.content, "Привет keep typed 日本語 ");
+                input.poll_dictation(input.dictation.generation, cx);
+                assert_eq!(input.content, "Привет keep typed 日本語 speech");
+                assert_eq!(input.dictation.phase, Phase::Idle);
+                input.undo(&Undo, window, cx);
+                assert_eq!(input.content, "Привет keep typed 日本語 ");
+            });
+        })
+        .unwrap();
+    assert_eq!(fake.borrow().finishes, 1);
+    assert_eq!(fake.borrow().drops, 1);
 }
 
 #[gpui::test]

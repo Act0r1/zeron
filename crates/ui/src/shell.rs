@@ -3545,7 +3545,7 @@ impl Shell {
             });
         }
         let owner = key.clone();
-        let sub = cx.subscribe_in(&browser, window, move |this, _, event, window, cx| {
+        let sub = cx.subscribe_in(&browser, window, move |this, browser, event, window, cx| {
             match event {
                 crate::browser::BrowserEvent::Changed => cx.notify(),
                 crate::browser::BrowserEvent::NewTab(url) => {
@@ -3558,6 +3558,54 @@ impl Shell {
                 }
                 crate::browser::BrowserEvent::Close => {
                     this.close_right_surface(RightSurface::Browser(id), window, cx)
+                }
+                crate::browser::BrowserEvent::Capture(capture) => {
+                    let dimensions = crate::appshots::png_dimensions(&capture.png);
+                    let valid = dimensions.is_some_and(|(width, height)| {
+                        crate::appshots::validate_capture_dimensions(width, height).is_ok()
+                    });
+                    if !valid || capture.png.len() as u64 > crate::attachments::MAX_ATTACHMENT_BYTES {
+                        this.composer.update(cx, |composer, cx| {
+                            composer.show_error("The browser screenshot could not be attached.", cx)
+                        });
+                        #[cfg(target_os = "linux")]
+                        browser.update(cx, |browser, cx| {
+                            browser.capture_attachment_finished(Some("The browser screenshot could not be attached.".into()), cx);
+                        });
+                        return;
+                    }
+                    let appshot = crate::appshots::CapturedAppshot {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        app_name: "Browser".into(),
+                        bundle_identifier: None,
+                        window_title: Some(capture.title.clone()),
+                        accessibility: crate::appshots::AccessibilitySnapshot {
+                            format_version: 1,
+                            content: format!("Page URL: {}\nViewport: {} × {} CSS pixels\n{}", capture.url, capture.viewport_width, capture.viewport_height, capture.feedback),
+                            truncated: false,
+                        },
+                        screenshot: crate::attachments::stage_png_bytes("Browser.png".into(), capture.png.clone()),
+                        screenshot_dimensions: dimensions,
+                        app_icon: None,
+                        captured_at: Utc::now(),
+                    };
+                    let attached = this.composer.update(cx, |composer, cx| {
+                        composer.stage_browser_capture_for(owner.clone(), appshot, &capture.message, cx)
+                    });
+                    #[cfg(target_os = "linux")]
+                    browser.update(cx, |browser, cx| {
+                        browser.capture_attachment_finished((!attached).then(|| "Remove an existing Appshot from the chat and try again. Your comments are kept here.".into()), cx);
+                    });
+                    if !attached {
+                        return;
+                    }
+                    if this.panel_key(cx) == owner {
+                        if this.right_pane_expanded {
+                            this.toggle_right_pane_expand(cx);
+                        }
+                        window.focus(&this.composer.focus_handle(cx), cx);
+                    }
+                    cx.notify();
                 }
             }
         });
@@ -7246,6 +7294,8 @@ impl Shell {
             theme.danger
         } else if queued {
             theme.warning
+        } else if status == zeron_proto::ChatIndicator::Working {
+            theme.busy
         } else {
             spaces::status_dot_color(status, theme)
         };
@@ -7413,6 +7463,12 @@ impl Shell {
                         .flex_row()
                         .items_center()
                         .gap(px(4.0))
+                        .when(working, |el| {
+                            el.h(px(16.0))
+                                .px(px(4.0))
+                                .rounded(px(4.0))
+                                .bg(status_color.opacity(0.14))
+                        })
                         .child(glyph)
                         .child(
                             div()
@@ -7506,6 +7562,8 @@ impl Shell {
         let fade_key = format!("{row_id}-hover");
         let rest_bg = if selected {
             selected_wash
+        } else if working {
+            status_color.opacity(0.08)
         } else {
             crate::theme::wash(0.0)
         };
@@ -7513,8 +7571,14 @@ impl Shell {
         // fills are identical so the blend is a no-op, but light's hover sits
         // below its near-opaque selected fill, and blending toward it visibly
         // dimmed the active row under the pointer (user report).
-        let hover_bg = if selected { selected_wash } else { hover };
-        let rest_text = if selected || search_query.is_some() {
+        let hover_bg = if selected {
+            selected_wash
+        } else if working {
+            status_color.opacity(0.14)
+        } else {
+            hover
+        };
+        let rest_text = if selected || working || search_query.is_some() {
             text
         } else if archived {
             text.opacity(0.55)
@@ -7523,6 +7587,7 @@ impl Shell {
         };
         div()
             .id(SharedString::from(row_id.clone()))
+            .relative()
             .group("sidebar-session-row")
             .debug_selector({
                 let row_id = row_id.clone();
@@ -7546,6 +7611,18 @@ impl Shell {
             .py(px(6.0))
             .text_color(motion::hover_blend(&fade_key, rest_text, text))
             .bg(motion::hover_blend(&fade_key, rest_bg, hover_bg))
+            .when(working, |el| {
+                el.child(
+                    div()
+                        .absolute()
+                        .left_0()
+                        .top(px(6.0))
+                        .bottom(px(6.0))
+                        .w(px(2.0))
+                        .rounded_full()
+                        .bg(status_color),
+                )
+            })
             // No selection ring (user request) — the wash alone marks the
             // active row.
             // Row hover drives BOTH the wash blend and the corner's
@@ -7720,6 +7797,7 @@ impl Shell {
                             div()
                                 .text_size(crate::typography::ui_rems(13.0))
                                 .line_height(px(17.0))
+                                .when(working, |el| el.font_weight(gpui::FontWeight::MEDIUM))
                                 .child(popover::search_highlight(title, search_query, theme)),
                         )
                         .into_any_element(),
@@ -11580,9 +11658,12 @@ impl Shell {
                     .text_color(theme.text_muted),
             );
         if plus_open {
+            let theme = theme.for_popup();
             let closing = self.right_plus.closing_since();
             let menu = popover::popover_card(&theme)
-                .w(px(168.0))
+                .bg(theme.surface_overlay.opacity(1.0))
+                .shadow_lg()
+                .w(px(192.0))
                 .on_mouse_down_out(cx.listener(|this, _, _, cx| this.close_right_plus(cx)))
                 .child(
                     div()

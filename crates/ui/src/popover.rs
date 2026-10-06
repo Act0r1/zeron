@@ -822,6 +822,16 @@ pub fn menu_at(
     content: AnyElement,
     closing: Option<std::time::Instant>,
 ) -> AnyElement {
+    menu_at_layer(id, position, content, closing, 1)
+}
+
+pub(crate) fn menu_at_layer(
+    id: impl Into<SharedString>,
+    position: Point<Pixels>,
+    content: AnyElement,
+    closing: Option<std::time::Instant>,
+    priority: usize,
+) -> AnyElement {
     let exit = closing.map(exit_progress);
     let content = frosted_menu(exit, content);
     gpui::deferred(
@@ -831,7 +841,7 @@ pub fn menu_at(
             .snap_to_window_with_margin(px(8.0))
             .child(menu_motion(id.into(), exit, div().occlude().child(content))),
     )
-    .priority(1)
+    .priority(priority)
     .into_any_element()
 }
 

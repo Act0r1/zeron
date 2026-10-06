@@ -1712,6 +1712,32 @@ impl RpcService for EngineRpc {
         match method {
             methods::ENGINE_INFO => RpcReply::value(&self.engine_info),
             methods::ENGINE_READY => RpcReply::value(&serde_json::json!({ "ready": true })),
+            methods::SEARCH_MESSAGES => {
+                #[derive(serde::Deserialize)]
+                struct SearchParams {
+                    query: String,
+                    limit: Option<usize>,
+                }
+                let p: SearchParams = parse_params(params)?;
+                if p.query.chars().count() > 256 {
+                    return Err(RpcError::Failed(
+                        "Search is limited to 256 characters.".into(),
+                    ));
+                }
+                let chats = self
+                    .workspace
+                    .read_chats()
+                    .map_err(|e| RpcError::Failed(e.to_string()))?
+                    .into_iter()
+                    .map(|chat| chat.id)
+                    .collect();
+                let result = self
+                    .doc_host
+                    .search_messages(chats, p.query, p.limit.unwrap_or(30).clamp(1, 50))
+                    .await
+                    .map_err(|e| RpcError::Failed(e.to_string()))?;
+                RpcReply::value(&result)
+            }
             methods::LIST_HARNESSES => RpcReply::value(&self.registry.descriptors()),
             methods::INSTALL_HARNESS => {
                 let p: ListModelsParams = parse_params(params)?;

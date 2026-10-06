@@ -16,6 +16,7 @@ fn button(
     // Match Files/History chrome, including focus-preserving mouse-down and
     // tooltips. Disabled controls have neither a pointer cursor nor a handler.
     crate::files::toolbar_button(id, label)
+        .size(px(28.0))
         .when(!enabled, |el| el.cursor_default().opacity(0.35))
         .child(
             icons::icon(glyph)
@@ -401,6 +402,8 @@ impl BrowserSurface {
 
 impl Render for BrowserSurface {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        #[cfg(target_os = "linux")]
+        if self.capture.is_some() { return self.render_capture(cx); }
         let theme = Theme::of(cx).clone();
         let focused = self.address.focus_handle(cx).is_focused(window);
         let external = !cfg!(any(target_os = "macos", target_os = "linux"));
@@ -440,31 +443,39 @@ impl Render for BrowserSurface {
         });
         let address = surface_chrome::input()
             .id("browser-address")
+            .h(px(30.0))
+            .px(px(10.0))
+            .gap(px(8.0))
+            .border_1()
+            .border_color(if focused { theme.accent } else { theme.border })
+            .bg(theme.surface_raised)
+            .cursor_text()
             .when(self.validation.is_some(), |el| {
-                el.border_1().border_color(theme.danger)
+                el.border_color(theme.danger)
             })
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|this, _, _, _| {
+                cx.listener(|this, _, window, cx| {
                     #[cfg(target_os = "macos")]
                     if let Some(native) = &this.native {
                         native.focus_chrome();
                     }
-                    #[cfg(not(target_os = "macos"))]
-                    let _ = this;
+                    if !this.address.focus_handle(cx).is_focused(window) {
+                        this.focus_address(window, cx);
+                    }
                 }),
             )
             .child(
                 icons::icon(icons::GLOBE)
-                    .size(px(12.0))
+                    .size(px(14.0))
                     .flex_none()
-                    .text_color(theme.text_faint),
+                    .text_color(theme.text_muted),
             )
             .child(
                 div()
                     .flex_1()
                     .min_w_0()
-                    .h(px(16.0))
+                    .h(px(18.0))
                     .overflow_hidden()
                     .child(self.address.clone()),
             )
@@ -472,7 +483,7 @@ impl Render for BrowserSurface {
                 el.child(
                     div()
                         .id("browser-go")
-                        .size(px(18.0))
+                        .size(px(22.0))
                         .flex_none()
                         .rounded(px(4.0))
                         .flex()
@@ -504,9 +515,15 @@ impl Render for BrowserSurface {
             el.on_click(cx.listener(|this, _, _, cx| this.open_external(cx)))
         });
         let toolbar = surface_chrome::toolbar(&theme)
+            .h(px(44.0))
+            .gap(px(6.0))
+            .bg(theme.surface)
             .when(!external, |el| el.child(back).child(forward).child(reload))
             .child(address)
             .child(open);
+        #[cfg(target_os = "linux")]
+        let toolbar = toolbar.child(button("browser-capture-page", "Screenshot to message", icons::FILE_IMAGE, self.can_capture(), &theme, cx)
+            .when(self.can_capture(), |el| el.on_click(cx.listener(|this, _, window, cx| this.begin_capture(window, cx)))));
 
         let body = div()
             .id("browser-page")
@@ -654,5 +671,6 @@ impl Render for BrowserSurface {
             .when(external, |el| el.child(div().h(px(26.0)).px(px(10.0)).flex().items_center().gap(px(5.0)).border_t_1().border_color(theme.border)
                 .text_size(crate::typography::ui_rems(10.0)).text_color(theme.text_faint)
                 .child(icons::icon(icons::ARROW_UP_RIGHT).size(px(11.0))).child("Opens in your default browser")))
+            .into_any_element()
     }
 }

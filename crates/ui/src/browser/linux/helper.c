@@ -607,7 +607,8 @@ static gboolean read_commands(gint fd, GIOCondition condition, gpointer unused) 
 int main(int argc, char **argv) {
     signal(SIGPIPE, SIG_IGN);
     // Offscreen GTK surfaces need CPU-addressable frames, never native GL child windows.
-    g_setenv("WEBKIT_DISABLE_DMABUF_RENDERER", "1", TRUE);
+    g_unsetenv("WEBKIT_DISABLE_DMABUF_RENDERER");
+    g_setenv("WEBKIT_DMABUF_RENDERER_FORCE_SHM", "1", TRUE);
     g_setenv("GDK_SCALE", "1", TRUE);
     g_setenv("GDK_DPI_SCALE", "1", TRUE);
     if (!gtk_init_check(&argc, &argv)) {

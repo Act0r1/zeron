@@ -22,6 +22,7 @@ pub enum NativeEvent {
     NewTab(String),
     Clipboard(String),
     Menu(Value),
+    CaptureElements(Value),
 }
 
 #[derive(Clone, Default)]
@@ -140,14 +141,21 @@ impl BrowserData {
                         b'M' => {let Ok(menu)=serde_json::from_slice(&data) else {continue;};NativeEvent::Menu(menu)}
                         b'C' => NativeEvent::Clipboard(String::from_utf8_lossy(&data).into_owned()),
                         b'N' => NativeEvent::NewTab(String::from_utf8_lossy(&data).into_owned()),
-                        #[cfg(feature = "browser-fixture")]
-                        b'J' => { *route.evaluation.lock().unwrap() = serde_json::from_slice(&data).ok(); continue; }
+                        b'J' => {
+                            let Ok(value) = serde_json::from_slice::<Value>(&data) else { continue; };
+                            if value.get("captureId").is_some() { NativeEvent::CaptureElements(value) }
+                            else {
+                                #[cfg(feature = "browser-fixture")]
+                                { *route.evaluation.lock().unwrap() = Some(value); }
+                                continue;
+                            }
+                        }
                         _ => continue,
                     };
                     // At most one latest frame is retained per page. A busy UI
                     // never accumulates video frames or blocks the engine.
                     match event {
-                        NativeEvent::NewTab(_) | NativeEvent::Clipboard(_) | NativeEvent::Menu(_) => { let _ = route.tx.blocking_send(event); }
+                        NativeEvent::NewTab(_) | NativeEvent::Clipboard(_) | NativeEvent::Menu(_) | NativeEvent::CaptureElements(_) => { let _ = route.tx.blocking_send(event); }
                         _ => { let _ = route.tx.try_send(event); }
                     }
                 }
@@ -313,11 +321,16 @@ impl super::BrowserSurface {
         cx: &mut gpui::Context<Self>,
     ) {
         use gpui::Focusable;
+        if let NativeEvent::CaptureElements(value) = event {
+            self.capture_elements_received(value, cx);
+            return;
+        }
         let Some(native) = &mut self.native else {
             return;
         };
         native.update_frame(window);
         match event {
+            NativeEvent::CaptureElements(_) => unreachable!(),
             NativeEvent::NewTab(url) => {
                 if self.presentation == Presentation::Live {
                     cx.emit(super::BrowserEvent::NewTab(Some(url)));
@@ -640,6 +653,8 @@ impl super::BrowserSurface {
                 px(menu["y"].as_f64().unwrap_or(0.) as f32),
             );
         let mut content = crate::popover::popover_card(theme)
+            .bg(theme.surface_overlay.opacity(1.0))
+            .shadow_lg()
             .w(px(240.))
             .on_mouse_down_out(cx.listener(|this, _, _, cx| this.linux_dismiss_menu(cx)));
         let mut rows = div()
@@ -650,16 +665,19 @@ impl super::BrowserSurface {
             .overflow_y_scroll();
         for (index, item) in items.iter().enumerate() {
             let enabled = item["enabled"].as_bool().unwrap_or(false);
+            if item["action"].as_str() == Some("back") && index > 0 {
+                rows = rows.child(div().h(px(1.0)).mx(px(8.0)).my(px(4.0)).bg(theme.border));
+            }
             let row = crate::popover::menu_row(
                 theme,
-                index == native.menu_active,
+                enabled && index == native.menu_active,
                 format!("browser-option-{index}"),
             )
             .id(("browser-option", index))
             .child(gpui::SharedString::from(
                 item["label"].as_str().unwrap_or("").to_owned(),
             ))
-            .when(!enabled, |el| el.opacity(0.4))
+            .when(!enabled, |el| el.cursor_default().opacity(0.45))
             .when(enabled, |el| {
                 el.on_click(cx.listener(move |this, _, _, cx| this.linux_choose_menu(index, cx)))
             });

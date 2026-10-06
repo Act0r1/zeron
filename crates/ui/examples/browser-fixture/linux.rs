@@ -522,7 +522,7 @@ pub async fn exercise(
         output,
         // Browser and Terminal are the two permanent rows. Keep this in sync
         // with the compact menu so the lower-right sample stays inside it.
-        (f32::from(bounds.origin.x) as f64 + 124., 42., 168., 78.),
+        (f32::from(bounds.origin.x) as f64 + 124., 42., 192., 78.),
         viewport,
     )?;
     window.update(cx, |s, _, cx| s.fixture_browser_menu(false, cx))?;

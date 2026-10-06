@@ -12,6 +12,8 @@ use std::{
     time::Duration,
 };
 use zeron_ui::*;
+#[path = "support/display.rs"]
+mod display;
 
 async fn pause(cx: &mut AsyncApp, ms: u64) {
     cx.background_executor()
@@ -20,6 +22,7 @@ async fn pause(cx: &mut AsyncApp, ms: u64) {
 }
 
 fn capture(directory: &std::path::Path, name: &str) -> anyhow::Result<()> {
+    display::require_isolated_display()?;
     let path = directory.join(format!("{name}.png"));
     #[cfg(target_os = "macos")]
     let status = {
@@ -110,16 +113,21 @@ fn validate_blur(
     anyhow::ensure!(sharp > 10., "blur sample did not cover the checkerboard");
     anyhow::ensure!(
         dark.0 < sharp * 0.035 && light.0 < sharp * 0.035,
-        "menu tint did not blur checkerboard edges"
+        "browser menu did not cover the page behind it"
     );
     anyhow::ensure!(
-        (light.1 - solid.1).abs() > 3.,
-        "menu is opaque instead of showing the live page backdrop"
+        (light.1 - solid.1).abs() < 1.,
+        "browser menu background changed with the page behind it"
+    );
+    anyhow::ensure!(
+        light.1 - dark.1 > 80.,
+        "browser menu did not follow the selected appearance"
     );
     Ok(())
 }
 
 fn main() -> anyhow::Result<()> {
+    display::require_isolated_display()?;
     tracing_subscriber::fmt()
         .with_env_filter(std::env::var("RUST_LOG").unwrap_or_else(|_| "warn".into()))
         .init();

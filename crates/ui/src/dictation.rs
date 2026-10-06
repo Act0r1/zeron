@@ -155,8 +155,6 @@ pub(crate) enum Phase {
     Listening,
     Finalizing,
     NoSpeech,
-    /// Released almost immediately: dictation is hold to talk.
-    Tapped,
     Denied(String),
     Unavailable(String),
     Failed(String),
@@ -168,30 +166,28 @@ impl Phase {
     }
 
     /// Button names describe the action, independently of the live status.
-    pub fn action_label(&self) -> &'static str {
+    pub fn action_label(&self, hands_free: bool) -> &'static str {
         match self {
-            Self::Idle | Self::Tapped => "Hold to dictate",
+            Self::Idle => "Click or hold to dictate",
+            Self::Requesting | Self::Listening if hands_free => "Click to transcribe",
             Self::Requesting | Self::Listening => "Release to transcribe",
             Self::Finalizing => "Transcribing",
             Self::NoSpeech | Self::Denied(_) | Self::Unavailable(_) | Self::Failed(_) => {
-                "Hold to retry dictation"
+                "Click or hold to retry dictation"
             }
         }
     }
 
-    pub fn status(&self) -> Option<(&str, &str)> {
+    pub fn status(&self, hands_free: bool) -> Option<(&str, &str)> {
         Some(match self {
             Self::Idle => return None,
             Self::Requesting => ("Getting ready…", "Wait for Listening before speaking."),
-            Self::Listening => ("Listening", "Release when you’re done · Up to 1 minute"),
+            Self::Listening if hands_free => ("Listening", "Click to finish"),
+            Self::Listening => ("Listening", "Release when you’re done"),
             Self::Finalizing => ("Transcribing…", "Processing on this device."),
             Self::NoSpeech => (
                 "No speech detected",
                 "Check your microphone, then try again.",
-            ),
-            Self::Tapped => (
-                "Hold to dictate",
-                "Keep holding the microphone or the shortcut while you speak.",
             ),
             Self::Denied(message) | Self::Unavailable(message) => {
                 ("Dictation unavailable", message)
@@ -204,6 +200,7 @@ impl Phase {
 #[derive(Default)]
 pub(crate) struct Dictation {
     pub phase: Phase,
+    pub hands_free: bool,
     pub generation: u64,
     range: Range<usize>,
     expected: String,
@@ -226,6 +223,7 @@ impl Dictation {
     pub fn cancel(&mut self) {
         self.generation = self.generation.wrapping_add(1);
         self.phase = Phase::Idle;
+        self.hands_free = false;
         self.pending_send = false;
         self.finish_started = None;
         self.expected.clear();
@@ -250,6 +248,22 @@ impl Dictation {
     pub fn timed_out(&self, now: Instant) -> bool {
         self.finish_started
             .is_some_and(|at| now.duration_since(at) >= FINALIZE_TIMEOUT)
+    }
+
+    pub fn allow_draft_edit(&mut self) -> bool {
+        if self.hands_free && self.phase.active() && !self.has_partial {
+            self.pending_send = false;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn follow_draft(&mut self, content: &str, selection: Range<usize>) {
+        if self.hands_free && self.phase.active() && !self.has_partial {
+            self.expected = content.to_owned();
+            self.range = selection;
+        }
     }
 
     /// Empty recognition does not erase selected text or the latest partial.

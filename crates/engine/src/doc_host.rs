@@ -1264,6 +1264,23 @@ impl DocHost {
         &self.inner.config.device_id
     }
 
+    pub(crate) async fn search_messages(
+        &self,
+        chats: Vec<String>,
+        query: String,
+        limit: usize,
+    ) -> Result<zeron_proto::MessageSearchResults, EngineError> {
+        let store = self.inner.store.clone();
+        let permit = store.message_search_gate.clone().lock_owned().await;
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            store.search_messages(&chats, &query, limit)
+        })
+        .await
+        .map_err(|error| EngineError::Other(error.to_string()))?
+        .map_err(|error| EngineError::Other(error.to_string()))
+    }
+
     /// Open (or return) the chat's doc handle: load the local snapshot (or init fresh),
     /// start the change-driven task, and request budgeted sync when configured.
     pub fn open(&self, chat_id: &str) -> Result<Arc<ChatDocHandle>, EngineError> {

@@ -2241,7 +2241,6 @@ pub(super) enum SpacesMenuRow {
     AddSpace,
 }
 
-/// New project navigates devices, locations, then folders on a command-palette surface.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ProjectStep {
     Devices,
@@ -2358,8 +2357,6 @@ struct Crumb {
 }
 
 enum CrumbTarget {
-    Devices,
-    Locations,
     Location(String, Option<String>),
     Folder(String),
     /// The `…` fold; opens [`Shell::render_project_crumb_menu`].
@@ -2580,8 +2577,8 @@ impl Shell {
         }
         self.settings.last_space_id = Some(space_id.clone());
         self.state.update(cx, |s, cx| {
-            s.select_space(Some(space_id), cx);
             s.select_chat(None, cx);
+            s.select_space(Some(space_id), cx);
         });
         self.schedule_save(cx);
         cx.notify();
@@ -4146,6 +4143,31 @@ impl Shell {
             .pt(px(8.0))
             .pb(px(4.0))
             .child(trigger)
+            .child(
+                div()
+                    .id("sidebar-add-project")
+                    .size(px(29.0))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(px(8.0))
+                    .cursor_pointer()
+                    .role(gpui::Role::Button)
+                    .aria_label("Add project")
+                    .tooltip(crate::settings::widgets::text_tooltip("Add project"))
+                    .hover(|el| el.bg(theme.glass_hover()))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.close_spaces_menu(cx);
+                        this.close_sidebar_view_menu(cx);
+                        this.open_add_space(cx);
+                    }))
+                    .child(
+                        icon(icons::PLUS)
+                            .size(px(16.0))
+                            .text_color(theme.text_muted),
+                    ),
+            )
             .child(view_trigger)
             .into_any_element()
     }
@@ -5551,10 +5573,19 @@ impl Shell {
             submit_task: None,
             _search_events: search_events,
         });
+        let state = self.state.read(cx);
+        let device = state
+            .devices
+            .iter()
+            .find(|device| Some(device.id.as_str()) == state.local_device_id.as_deref())
+            .or_else(|| (state.devices.len() == 1).then(|| &state.devices[0]))
+            .cloned();
+        if let Some(device) = device {
+            self.add_space_pick_device(device, cx);
+        }
         cx.notify();
     }
 
-    /// Selecting a device advances to its locations.
     fn add_space_pick_device(&mut self, device: Device, cx: &mut Context<Self>) {
         let Some(flow) = self.add_space.as_mut() else {
             return;
@@ -5579,7 +5610,7 @@ impl Shell {
             input.set_text("", cx);
         });
         self.load_space_drives(cx);
-        cx.notify();
+        self.add_space_goto_location("Home".into(), None, cx);
     }
 
     fn add_space_goto_location(
@@ -5597,7 +5628,7 @@ impl Shell {
         flow.browser_repo = false;
         let search = flow.search.clone();
         search.update(cx, |input, cx| {
-            input.set_placeholder("Search folders…", cx);
+            input.set_placeholder("Search folders or paste a path…", cx);
             input.set_text("", cx);
         });
         self.load_space_folders(path, cx);
@@ -5607,29 +5638,22 @@ impl Shell {
         let Some(flow) = self.add_space.as_mut() else {
             return;
         };
+        if flow.submit_busy {
+            return;
+        }
         flow.focus_pending = true;
         flow.step = step;
-        flow.load_task = None;
-        flow.browser = Loadable::Idle;
-        flow.browser_path = None;
-        flow.location = None;
-        flow.browser_repo = false;
         flow.active = 0;
         flow.error = None;
         flow.list_scroll.set_offset(gpui::Point::default());
-        if step == ProjectStep::Devices {
-            flow.drives_task = None;
-            flow.device = None;
-            flow.drives = Loadable::Idle;
-            flow.home = None;
-        }
+        self.project_crumb_menu = popover::Popup::default();
         let search = flow.search.clone();
         search.update(cx, |input, cx| {
             input.set_placeholder(
-                if step == ProjectStep::Devices {
-                    "Search devices…"
-                } else {
-                    "Search locations…"
+                match step {
+                    ProjectStep::Devices => "Search devices…",
+                    ProjectStep::Locations => "Search locations…",
+                    ProjectStep::Folders => "Search folders or paste a path…",
                 },
                 cx,
             );
@@ -5912,6 +5936,15 @@ impl Shell {
 
     /// ListFolders on the flow's device (relay-forwarded when remote).
     pub(super) fn load_space_folders(&mut self, path: Option<String>, cx: &mut Context<Self>) {
+        self.load_space_folders_for_submit(path, None, cx);
+    }
+
+    fn load_space_folders_for_submit(
+        &mut self,
+        path: Option<String>,
+        submit_query: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
         let engine = self.state.read(cx).engine().cloned();
         let local = self.state.read(cx).local_device_id.clone();
         let Some(flow) = self.add_space.as_mut() else {
@@ -5959,6 +5992,12 @@ impl Shell {
                         Err(err) => Loadable::Error(err.to_string()),
                     };
                 }
+                if shell.add_space.as_ref().is_some_and(|flow| {
+                    flow.browser.ready().is_some()
+                        && submit_query.as_deref() == Some(flow.search.read(cx).text())
+                }) {
+                    shell.create_add_space(cx);
+                }
                 cx.notify();
             })
             .ok();
@@ -5988,8 +6027,28 @@ impl Shell {
         cx.notify();
     }
 
-    /// Create the space for the browser's current folder.
     fn submit_add_space(&mut self, cx: &mut Context<Self>) {
+        let Some(flow) = self.add_space.as_mut() else {
+            return;
+        };
+        if flow.submit_busy || flow.step != ProjectStep::Folders {
+            return;
+        }
+        let query = flow.search.read(cx).text().to_string();
+        if let Some(path) = crate::pickers::typed_path_target(&query, flow.home.as_deref()) {
+            flow.browser_repo = false;
+            flow.error = None;
+            self.load_space_folders_for_submit(Some(path), Some(query), cx);
+        } else if query.trim() == "~" || query.trim().starts_with("~/") {
+            flow.error = Some("Home directory is not available yet".into());
+            cx.notify();
+        } else {
+            self.create_add_space(cx);
+        }
+    }
+
+    /// Create the space for the browser's current folder.
+    fn create_add_space(&mut self, cx: &mut Context<Self>) {
         let Some(engine) = self.state.read(cx).engine().cloned() else {
             return;
         };
@@ -6085,39 +6144,24 @@ impl Shell {
         cx.notify();
     }
 
-    /// Back traverses folders, then locations, then devices.
     fn add_space_go_up(&mut self, cx: &mut Context<Self>) {
         let Some(flow) = &self.add_space else {
             return;
         };
         match flow.step {
-            ProjectStep::Devices => return,
-            ProjectStep::Locations => self.add_space_back_to(ProjectStep::Devices, cx),
+            ProjectStep::Devices | ProjectStep::Locations => {
+                if flow.device.is_some() {
+                    self.add_space_back_to(ProjectStep::Folders, cx);
+                }
+            }
             ProjectStep::Folders => {
-                let listing = flow.browser.ready();
-                let root = flow
-                    .location
-                    .as_ref()
-                    .and_then(|(_, path)| path.as_deref())
-                    .or(flow.home.as_deref());
-                let parent = listing
-                    .filter(|l| Some(l.path.as_str()) != root)
-                    .and_then(|l| parent_path(&l.path));
-                if let Some(parent) = parent {
+                if let Some(parent) = flow.browser.ready().and_then(|l| parent_path(&l.path)) {
                     self.add_space_descend(parent, false, cx);
-                } else {
-                    self.add_space_back_to(ProjectStep::Locations, cx);
                 }
             }
         }
     }
 
-    /// Palette keys (bubbling from the focused search input) — every legend
-    /// maps to a REAL key: ↑↓ (or ctrl-n/p) navigate, →/⏎ open the
-    /// highlighted folder, ← up a level, ⇥ completes the query to the
-    /// previewed folder name, ⌘⏎ add the OPEN folder, ⌫ (empty query) also
-    /// goes up, esc closes. (Typing `/` also descends — see the Edited
-    /// subscription.)
     fn add_space_key(&mut self, event: &gpui::KeyDownEvent, cx: &mut Context<Self>) {
         if hidden_folders_shortcut(&event.keystroke) {
             if !event.is_held {
@@ -6131,16 +6175,19 @@ impl Shell {
         match event.keystroke.key.as_str() {
             "right" => {
                 self.add_space_open_active(cx);
+                cx.stop_propagation();
                 return;
             }
             "left" => {
                 self.add_space_go_up(cx);
+                cx.stop_propagation();
                 return;
             }
             // Unbound in "PaletteSearch" (like enter), so it bubbles here
             // instead of editing text or moving focus.
             "tab" => {
                 self.add_space_accept_completion(cx);
+                cx.stop_propagation();
                 return;
             }
             _ => {}
@@ -6172,13 +6219,20 @@ impl Shell {
                     cx.notify();
                 }
             }
-            // ⏎ opens the highlighted folder (an alias for →); the space is
-            // added with ⌘⏎ — and the chord acts on the folder OPEN in the
-            // breadcrumbs, not the highlight. The highlight auto-rests on the
-            // first row, so a chord that took it would add arbitrary
-            // subfolders; the usual target (a repo root full of subfolders)
-            // is only ever "the folder you're standing in".
-            popover::MenuKey::Enter => self.add_space_open_active(cx),
+            popover::MenuKey::Enter => {
+                let add_current = self.add_space.as_ref().is_some_and(|flow| {
+                    let query = flow.search.read(cx).text();
+                    flow.step == ProjectStep::Folders
+                        && (query.trim().is_empty()
+                            || crate::pickers::typed_path_target(query, flow.home.as_deref())
+                                .is_some())
+                });
+                if add_current {
+                    self.submit_add_space(cx);
+                } else {
+                    self.add_space_open_active(cx);
+                }
+            }
             popover::MenuKey::ModEnter => self.submit_add_space(cx),
             popover::MenuKey::Backspace => {
                 let empty = self
@@ -6189,8 +6243,9 @@ impl Shell {
                     self.add_space_go_up(cx);
                 }
             }
-            popover::MenuKey::Other => {}
+            popover::MenuKey::Other => return,
         }
+        cx.stop_propagation();
     }
 
     pub(super) fn close_project_crumb_menu(&mut self, cx: &mut Context<Self>) {
@@ -6283,6 +6338,8 @@ impl Shell {
             input.set_ghost(ghost, cx);
         });
         let query = search.read(cx).text().to_string();
+        let typed_path = step == ProjectStep::Folders
+            && crate::pickers::typed_path_target(&query, home.as_deref()).is_some();
         let query = if step == ProjectStep::Folders {
             crate::pickers::typed_path_query(&query, home.as_deref())
                 .map(|(_, segment)| segment)
@@ -6327,7 +6384,12 @@ impl Shell {
             ProjectStep::Devices => {
                 for (ix, device) in self.add_space_devices(cx).into_iter().enumerate() {
                     let online = self.state.read(cx).device_online(&device.id, Utc::now());
-                    let name = device.name.clone();
+                    let name = if self.state.read(cx).local_device_id.as_deref() == Some(&device.id)
+                    {
+                        format!("This computer · {}", device.name)
+                    } else {
+                        device.name.clone()
+                    };
                     rows.push(
                         row(ix)
                             .child(glyph_el(device_glyph(&device.platform)))
@@ -6454,7 +6516,7 @@ impl Shell {
                 ),
                 ProjectStep::Folders => (
                     "No folders match",
-                    "Type a path like ~/code or /mnt to jump there.".to_string(),
+                    "Paste a path like ~/code or /mnt and press Enter to add it.".to_string(),
                 ),
             };
             results = results.child(command_palette::palette_empty(&theme, title, hint));
@@ -6474,22 +6536,8 @@ impl Shell {
         // Breadcrumbs: one line that scrolls sideways under edge fades rather
         // than wrapping, and follows the open folder as the path grows. Deep
         // paths fold their middle folders into a `…` menu.
-        let mut specs: Vec<Crumb> = vec![Crumb {
-            name: "New project".into(),
-            glyph: None,
-            current: step == ProjectStep::Devices,
-            target: CrumbTarget::Devices,
-        }];
-        let mut crumb_key = String::new();
-        if let Some(device) = device {
-            crumb_key.push_str(&device.id);
-            specs.push(Crumb {
-                name: device.name.into(),
-                glyph: Some(device_glyph(&device.platform)),
-                current: step == ProjectStep::Locations,
-                target: CrumbTarget::Locations,
-            });
-        }
+        let mut specs: Vec<Crumb> = Vec::new();
+        let mut crumb_key = device.as_ref().map(|d| d.id.clone()).unwrap_or_default();
         let mut hidden: Vec<(String, String)> = Vec::new();
         if let Some((name, path)) = location {
             let root = path.clone().or(home.clone());
@@ -6501,22 +6549,30 @@ impl Shell {
                 .or(browser_path)
                 .or(root.clone());
             let at_root = open_path.is_none() || open_path == root;
+            let in_location = root
+                .as_deref()
+                .zip(open_path.as_deref())
+                .is_none_or(|(root, path)| path_under(path, root));
             crumb_key.push_str(&name);
-            specs.push(Crumb {
-                name: name.clone().into(),
-                glyph: Some(if path.is_none() {
-                    icons::HOME
-                } else {
-                    icons::HARD_DRIVE
-                }),
-                current: at_root,
-                target: CrumbTarget::Location(name, path),
-            });
+            if in_location {
+                specs.push(Crumb {
+                    name: name.clone().into(),
+                    glyph: Some(if path.is_none() {
+                        icons::HOME
+                    } else {
+                        icons::HARD_DRIVE
+                    }),
+                    current: at_root,
+                    target: CrumbTarget::Location(name, path),
+                });
+            }
             if let Some(open_path) = open_path {
                 crumb_key.push_str(&open_path);
                 let mut folders: Vec<(String, String)> = breadcrumbs(&open_path)
                     .into_iter()
-                    .filter(|(_, full)| !root.as_deref().is_some_and(|root| path_under(root, full)))
+                    .filter(|(_, full)| {
+                        !in_location || !root.as_deref().is_some_and(|root| path_under(root, full))
+                    })
                     .collect();
                 hidden = fold_crumb_folders(&mut folders);
                 if !hidden.is_empty() {
@@ -6601,12 +6657,6 @@ impl Shell {
                     })
                     .hover(|s| s.bg(theme.element_hover).text_color(theme.text));
                 el = match spec.target {
-                    CrumbTarget::Devices => el.on_click(cx.listener(|this, _, _, cx| {
-                        this.add_space_back_to(ProjectStep::Devices, cx)
-                    })),
-                    CrumbTarget::Locations => el.on_click(cx.listener(|this, _, _, cx| {
-                        this.add_space_back_to(ProjectStep::Locations, cx)
-                    })),
                     CrumbTarget::Location(name, path) => {
                         el.on_click(cx.listener(move |this, _, _, cx| {
                             this.add_space_goto_location(name.clone(), path.clone(), cx)
@@ -6659,13 +6709,6 @@ impl Shell {
             .overflow_x_scroll()
             .track_scroll(&crumb_scroll)
             .children(trail);
-        // ← mirrors the Left key: up one level, and back to Cmd+K from the
-        // first step.
-        let back_label = if step == ProjectStep::Devices {
-            "Back to commands"
-        } else {
-            "Back"
-        };
         let crumbs = div()
             .h(px(36.0))
             .flex_none()
@@ -6688,17 +6731,10 @@ impl Shell {
                     .rounded(px(6.0))
                     .cursor_pointer()
                     .role(gpui::Role::Button)
-                    .aria_label(back_label)
-                    .tooltip(crate::settings::widgets::text_tooltip(back_label))
+                    .aria_label("Up one folder")
+                    .tooltip(crate::settings::widgets::text_tooltip("Up one folder"))
                     .hover(|s| s.bg(theme.element_hover))
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        if this.add_space.as_ref().map(|f| f.step) == Some(ProjectStep::Devices) {
-                            this.add_space = None;
-                            this.toggle_command_palette(window, cx);
-                        } else {
-                            this.add_space_go_up(cx);
-                        }
-                    }))
+                    .on_click(cx.listener(|this, _, _, cx| this.add_space_go_up(cx)))
                     .child(
                         icon(icons::ARROW_LEFT)
                             .size(px(16.0))
@@ -6711,6 +6747,84 @@ impl Shell {
                     .fade_left(true)
                     .fade_right(true)
                     .fade_overflow_x(&crumb_scroll),
+            )
+            .child(
+                popover::btn_ghost(&theme, "Locations", "project-locations")
+                    .id("project-locations")
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .gap(px(4.0))
+                    .py(px(4.0))
+                    .role(gpui::Role::Button)
+                    .aria_label("Home and drives")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.add_space_back_to(ProjectStep::Locations, cx);
+                    }))
+                    .child(icon(icons::ALT_ARROW_DOWN).size(px(12.0))),
+            );
+
+        let device_name = device
+            .as_ref()
+            .map(|device| {
+                if self.state.read(cx).local_device_id.as_deref() == Some(&device.id) {
+                    "This computer".to_string()
+                } else {
+                    device.name.clone()
+                }
+            })
+            .unwrap_or_else(|| "Choose computer".into());
+        let heading = div()
+            .flex()
+            .items_center()
+            .gap(px(12.0))
+            .px(px(16.0))
+            .pt(px(12.0))
+            .pb(px(4.0))
+            .child(
+                div()
+                    .flex_1()
+                    .text_size(crate::typography::ui_rems(14.0))
+                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .child("Add project"),
+            )
+            .child(
+                popover::btn_ghost(&theme, "", "project-device")
+                    .id("project-device")
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .max_w(px(240.0))
+                    .role(gpui::Role::Button)
+                    .aria_label("Choose computer")
+                    .aria_expanded(step == ProjectStep::Devices)
+                    .tooltip(crate::settings::widgets::text_tooltip(
+                        device
+                            .as_ref()
+                            .map(|d| d.name.clone())
+                            .unwrap_or_else(|| "Choose computer".into()),
+                    ))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        let step = if this.add_space.as_ref().is_some_and(|flow| {
+                            flow.step == ProjectStep::Devices && flow.device.is_some()
+                        }) {
+                            ProjectStep::Folders
+                        } else {
+                            ProjectStep::Devices
+                        };
+                        this.add_space_back_to(step, cx);
+                    }))
+                    .child(
+                        icon(
+                            device
+                                .as_ref()
+                                .map(|d| device_glyph(&d.platform))
+                                .unwrap_or(icons::MONITOR),
+                        )
+                        .size(px(14.0)),
+                    )
+                    .child(div().min_w_0().truncate().child(device_name))
+                    .child(icon(icons::ALT_ARROW_DOWN).size(px(12.0))),
             );
 
         let shortcut = {
@@ -6719,19 +6833,26 @@ impl Shell {
             let valid = Keystroke::parse(&platform_combo(combo)).is_ok();
             crate::settings::badge_combo(if valid { combo } else { id.default_combo() })
         };
-        let can_add = !busy && listing.is_some();
+        let can_add = !busy && (typed_path || listing.is_some());
         let footer = command_palette::palette_footer()
             .child(command_palette::command_key_hint(&theme, "↑ ↓", "Navigate"))
             .child(command_palette::command_key_hint(
                 &theme,
                 "↵",
-                if step == ProjectStep::Folders {
+                if step == ProjectStep::Folders
+                    && (typed_path || search.read(cx).text().trim().is_empty())
+                {
+                    "Add project"
+                } else if step == ProjectStep::Folders {
                     "Open"
                 } else {
                     "Select"
                 },
             ))
-            .when(step != ProjectStep::Devices, |el| {
+            .when(step == ProjectStep::Folders, |el| {
+                el.child(command_palette::command_key_hint(&theme, "→", "Open"))
+            })
+            .when(device.is_some(), |el| {
                 el.child(command_palette::command_key_hint(&theme, "←", "Back"))
             })
             .child(command_palette::command_key_hint(&theme, "Esc", "Close"))
@@ -6775,77 +6896,109 @@ impl Shell {
                             "Show hidden folders",
                         )),
                 )
-            })
-            .when(step == ProjectStep::Folders, |el| {
-                el.child(div().flex_1()).child(
-                    div()
-                        .id("project-add")
-                        .flex()
-                        .items_center()
-                        .gap(px(6.0))
-                        // Even 3px around the key chip, concentric corners
-                        // (chip 5px + 3px); negative margins keep the footer
-                        // height and the label on the footer's right inset.
-                        .pl(px(3.0))
-                        .pr(px(8.0))
-                        .py(px(3.0))
-                        .my(px(-3.0))
-                        .mr(px(-8.0))
-                        .rounded(px(8.0))
-                        .role(gpui::Role::Button)
-                        .aria_label("Add project")
-                        .when(can_add, |el| {
-                            el.cursor_pointer()
-                                .hover(|s| s.bg(crate::theme::card_selected_bg()))
-                                .active(|s| s.opacity(0.8))
-                                .on_click(cx.listener(|this, _, _, cx| this.submit_add_space(cx)))
-                        })
-                        .when(!can_add, |el| el.opacity(0.5))
-                        .child(popover::kbd_hint(
-                            &theme,
-                            &crate::settings::badge_combo("mod-enter"),
-                        ))
-                        .child(
-                            div()
-                                .text_size(crate::typography::ui_rems(10.0))
-                                .font_weight(gpui::FontWeight::MEDIUM)
-                                .text_color(theme.text)
-                                .child(if busy { "Adding…" } else { "Add project" }),
-                        ),
-                )
             });
-        let card =
-            command_palette::palette_card("add-space-palette", &focus, viewport, &theme)
-                .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, _, cx| {
-                    this.add_space_key(event, cx)
-                }))
-                .on_mouse_down_out(cx.listener(|this, _, _, cx| {
-                    // The crumb menu floats outside the card; its own
-                    // mouse-down-out dismisses it without closing the palette.
-                    if this.project_crumb_menu.get().is_some() {
-                        return;
-                    }
-                    this.add_space = None;
-                    cx.notify();
-                }))
-                .child(command_palette::palette_header(
-                    &theme,
-                    search.into_any_element(),
-                    popover::kbd_hint(&theme, &shortcut),
-                ))
-                .child(crumbs)
-                .child(results)
-                .when_some(error, |el, error| {
-                    el.child(
+        let selected_path = if typed_path {
+            crate::pickers::typed_path_target(search.read(cx).text(), home.as_deref())
+        } else {
+            listing.as_ref().map(|listing| listing.path.clone())
+        };
+        let confirmation = div()
+            .flex()
+            .items_center()
+            .gap(px(12.0))
+            .px(px(16.0))
+            .py(px(12.0))
+            .border_t_1()
+            .border_color(crate::theme::hairline(0.06))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .gap(px(3.0))
+                    .child(
                         div()
-                            .px(px(16.0))
-                            .pb(px(8.0))
-                            .text_size(crate::typography::ui_rems(12.0))
-                            .text_color(theme.danger)
-                            .child(error),
+                            .text_size(crate::typography::ui_rems(11.0))
+                            .text_color(theme.text_muted)
+                            .child("Project folder"),
                     )
-                })
-                .child(footer);
+                    .child(
+                        div()
+                            .id("project-selected-path")
+                            .truncate()
+                            .text_size(crate::typography::ui_rems(12.0))
+                            .child(
+                                selected_path
+                                    .clone()
+                                    .unwrap_or_else(|| "Choose a folder".into()),
+                            )
+                            .when_some(selected_path, |el, path| {
+                                el.tooltip(crate::settings::widgets::text_tooltip(path))
+                            }),
+                    ),
+            )
+            .child(
+                popover::btn_primary(&theme, if busy { "Adding…" } else { "Add this folder" })
+                    .id("project-add")
+                    .flex_none()
+                    .role(gpui::Role::Button)
+                    .aria_label("Add this folder")
+                    .tooltip(crate::settings::widgets::text_tooltip(format!(
+                        "Add this folder ({})",
+                        crate::settings::badge_combo("mod-enter"),
+                    )))
+                    .when(!can_add, |el| el.opacity(0.5).cursor_default())
+                    .when(can_add, |el| {
+                        el.on_click(cx.listener(|this, _, _, cx| this.submit_add_space(cx)))
+                    }),
+            );
+        let card = command_palette::palette_card("add-space-palette", &focus, viewport, &theme)
+            .on_key_down(
+                cx.listener(|this, event: &gpui::KeyDownEvent, _, cx| {
+                    this.add_space_key(event, cx)
+                }),
+            )
+            .on_mouse_down_out(cx.listener(|this, _, _, cx| {
+                // The crumb menu floats outside the card; its own
+                // mouse-down-out dismisses it without closing the palette.
+                if this.project_crumb_menu.get().is_some() {
+                    return;
+                }
+                this.add_space = None;
+                cx.notify();
+            }))
+            .child(heading)
+            .child(command_palette::palette_header(
+                &theme,
+                search.into_any_element(),
+                popover::kbd_hint(&theme, &shortcut),
+            ))
+            .when(step == ProjectStep::Folders, |el| el.child(crumbs))
+            .when(step != ProjectStep::Folders && device.is_some(), |el| {
+                el.child(
+                    div().px(px(12.0)).py(px(4.0)).child(
+                        popover::btn_ghost(&theme, "Back to folders", "project-back-to-folders")
+                            .id("project-back-to-folders")
+                            .role(gpui::Role::Button)
+                            .aria_label("Back to folders")
+                            .on_click(cx.listener(|this, _, _, cx| this.add_space_go_up(cx))),
+                    ),
+                )
+            })
+            .child(results)
+            .when_some(error, |el, error| {
+                el.child(
+                    div()
+                        .px(px(16.0))
+                        .pb(px(8.0))
+                        .text_size(crate::typography::ui_rems(12.0))
+                        .text_color(theme.danger)
+                        .child(error),
+                )
+            })
+            .when(step == ProjectStep::Folders, |el| el.child(confirmation))
+            .child(footer);
         Some(command_palette::palette_overlay(viewport, card))
     }
 
@@ -7424,6 +7577,7 @@ mod project_flow_tests {
         let shell = cx.new(|cx| {
             let state = cx.new(|_| {
                 let mut state = AppState::new();
+                state.local_device_id = Some("local".into());
                 state.devices = serde_json::from_value(serde_json::json!([
                     {"id":"local","name":"Studio","platform":"macos","lastSeenAt":null},
                     {"id":"remote","name":"Server","platform":"linux","lastSeenAt":null,
@@ -7448,21 +7602,37 @@ mod project_flow_tests {
         });
         shell.update(cx, |shell, cx| {
             shell.open_add_space(cx);
-            assert_eq!(shell.add_space.as_ref().unwrap().step, ProjectStep::Devices);
-            assert!(shell.add_space.as_ref().unwrap().device.is_none());
+            assert_eq!(shell.add_space.as_ref().unwrap().step, ProjectStep::Folders);
+            assert_eq!(
+                shell
+                    .add_space
+                    .as_ref()
+                    .unwrap()
+                    .device
+                    .as_ref()
+                    .unwrap()
+                    .id,
+                "local"
+            );
+            assert_eq!(
+                shell.add_space.as_ref().unwrap().location,
+                Some(("Home".into(), None))
+            );
+            shell.add_space_back_to(ProjectStep::Devices, cx);
             assert!(!shell.add_space.as_ref().unwrap().show_hidden);
             let search = shell.add_space.as_ref().unwrap().search.clone();
             search.update(cx, |input, cx| input.set_text("server", cx));
             assert_eq!(shell.add_space_devices(cx).len(), 1);
             shell.add_space_open_active(cx);
             let flow = shell.add_space.as_mut().unwrap();
-            assert_eq!(flow.step, ProjectStep::Locations);
+            assert_eq!(flow.step, ProjectStep::Folders);
             assert_eq!(flow.device.as_ref().unwrap().id, "remote");
             assert!(flow.search.read(cx).is_empty());
             flow.drives = Loadable::Ready(vec![DriveEntry {
                 name: "Projects".into(),
                 path: "/projects".into(),
             }]);
+            shell.add_space_back_to(ProjectStep::Locations, cx);
             search.update(cx, |input, cx| input.set_text("projects", cx));
             shell.add_space_open_active(cx);
             let flow = shell.add_space.as_mut().unwrap();
@@ -7497,19 +7667,27 @@ mod project_flow_tests {
                 truncated: false,
             });
             shell.add_space_go_up(cx);
+            assert_eq!(shell.add_space.as_ref().unwrap().step, ProjectStep::Folders);
             assert_eq!(
-                shell.add_space.as_ref().unwrap().step,
-                ProjectStep::Locations
+                shell.add_space.as_ref().unwrap().browser_path.as_deref(),
+                Some("/")
             );
-            shell.toggle_space_hidden_folders(cx);
-            assert!(shell.add_space.as_ref().unwrap().show_hidden);
-            assert!(shell.add_space.as_ref().unwrap().browser.ready().is_none());
-            shell.add_space_go_up(cx);
+            shell.add_space_back_to(ProjectStep::Devices, cx);
             let flow = shell.add_space.as_ref().unwrap();
-            assert_eq!(flow.step, ProjectStep::Devices);
-            assert!(flow.device.is_none());
-            assert!(flow.drives.ready().is_none());
+            assert_eq!(flow.device.as_ref().unwrap().id, "remote");
             assert!(flow.search.read(cx).is_empty());
+            shell.add_space_go_up(cx);
+            assert_eq!(shell.add_space.as_ref().unwrap().step, ProjectStep::Folders);
+            shell.add_space_back_to(ProjectStep::Devices, cx);
+            search.update(cx, |input, cx| input.set_text("studio", cx));
+            shell.add_space_open_active(cx);
+            let flow = shell.add_space.as_ref().unwrap();
+            assert_eq!(flow.step, ProjectStep::Folders);
+            assert_eq!(flow.device.as_ref().unwrap().id, "local");
+            assert!(flow.home.is_none());
+            assert!(flow.browser_path.is_none());
+            assert!(flow.drives.ready().is_none());
+            shell.add_space_back_to(ProjectStep::Devices, cx);
             // Slash navigation only applies to folders, never device search.
             search.update(cx, |input, cx| input.set_text("/projects/", cx));
             assert!(!shell.add_space_slash_descend(cx));

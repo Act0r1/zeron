@@ -9,6 +9,7 @@ pub mod file_mentions;
 pub mod invocation;
 pub mod motion;
 pub mod preview;
+pub mod search;
 pub mod sidebar_pins;
 pub mod view;
 pub mod workspace;
@@ -16,6 +17,7 @@ pub mod workspace;
 pub use agent::*;
 pub use entities::*;
 pub use preview::*;
+pub use search::*;
 pub use sidebar_pins::*;
 pub use workspace::*;
 
