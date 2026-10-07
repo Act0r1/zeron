@@ -25,6 +25,7 @@ pub mod capabilities {
         MESSAGE_QUEUE_CLEAN_ATTACHMENT_TEXT_V1,
         MESSAGE_QUEUE_EDIT_LEASE_V1,
         HARNESS_UPDATES_V1,
+        crate::voice::remote::CAPABILITY,
         LIST_FOLDERS_SHOW_HIDDEN_V1,
     ];
 
@@ -106,6 +107,7 @@ mod tests {
                     "message-queue-clean-attachment-text-v1",
                     "message-queue-edit-lease-v1",
                     "harness-updates-v1",
+                    "voice-client-media-v1",
                     "list-folders-show-hidden-v1"
                 ],
             })
