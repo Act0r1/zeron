@@ -15668,6 +15668,7 @@ mod tests {
             subagent_ref: None,
             subagent_status: None,
             subagent_tail: None,
+            images: Arc::new([]),
             kind: ToolItemKind::Call,
         };
         // The chip header inside a clickable parent, standing in for the
